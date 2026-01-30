@@ -4,6 +4,10 @@ const puppeteer = require('puppeteer-core');
 // Hardcoded Optimizely Project ID for filtering
 const MY_OPTIMIZELY_PROJECT_ID = '30018331732';
 
+// Optimize Chromium for faster cold starts
+chromium.setHeadlessMode = true;
+chromium.setGraphicsMode = false;
+
 module.exports = async (req, res) => {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -38,18 +42,32 @@ module.exports = async (req, res) => {
   let browser = null;
 
   try {
-    // Launch browser with Chromium optimized for serverless
+    // Launch browser with minimal args for faster startup
     browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
+      args: [
+        ...chromium.args,
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--single-process',
+        '--no-zygote',
+      ],
+      defaultViewport: { width: 1280, height: 720 },
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
     });
 
     const page = await browser.newPage();
 
-    // Set viewport
-    await page.setViewport({ width: 1280, height: 720 });
+    // Block unnecessary resources for faster loading
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      const resourceType = request.resourceType();
+      if (['image', 'media', 'font'].includes(resourceType)) {
+        request.abort();
+      } else {
+        request.continue();
+      }
+    });
 
     // Set user agent
     await page.setUserAgent(
@@ -72,14 +90,14 @@ module.exports = async (req, res) => {
       }
     });
 
-    // Navigate to URL with timeout
+    // Navigate to URL with shorter timeout
     await page.goto(targetUrl.href, {
-      waitUntil: 'networkidle2',
-      timeout: 30000,
+      waitUntil: 'domcontentloaded',
+      timeout: 20000,
     });
 
-    // Wait a bit for any lazy-loaded scripts
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Short wait for scripts to initialize
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     // Extract all data from the page
     const extractedData = await page.evaluate((projectId) => {
@@ -108,7 +126,6 @@ module.exports = async (req, res) => {
         };
 
         try {
-          // Get project ID
           if (opt.get) {
             const state = opt.get('state');
             if (state) {
@@ -127,7 +144,6 @@ module.exports = async (req, res) => {
               optimizelyData.revision = data.revision;
               optimizelyData.accountId = data.accountId;
 
-              // Get experiments
               if (data.experiments) {
                 Object.entries(data.experiments).forEach(([id, exp]) => {
                   const experiment = {
@@ -140,13 +156,10 @@ module.exports = async (req, res) => {
                     percentageIncluded: exp.percentageIncluded || null,
                     metrics: exp.metrics || [],
                     holdback: exp.holdback || 0,
-                    isActive:
-                      optimizelyData.state?.activeExperiments?.includes(id),
-                    currentVariation:
-                      optimizelyData.state?.variationMap?.[id]?.id || null,
+                    isActive: optimizelyData.state?.activeExperiments?.includes(id),
+                    currentVariation: optimizelyData.state?.variationMap?.[id]?.id || null,
                   };
 
-                  // Get variations
                   if (exp.variations) {
                     Object.entries(exp.variations).forEach(([varId, variation]) => {
                       experiment.variations.push({
@@ -163,7 +176,6 @@ module.exports = async (req, res) => {
                 });
               }
 
-              // Get audiences
               if (data.audiences) {
                 Object.entries(data.audiences).forEach(([id, aud]) => {
                   optimizelyData.audiences.push({
@@ -174,7 +186,6 @@ module.exports = async (req, res) => {
                 });
               }
 
-              // Get pages
               if (data.pages) {
                 Object.entries(data.pages).forEach(([id, pg]) => {
                   optimizelyData.pages.push({
@@ -182,12 +193,10 @@ module.exports = async (req, res) => {
                     name: pg.name,
                     apiName: pg.apiName,
                     category: pg.category,
-                    activationCode: pg.activationCode ? 'present' : null,
                   });
                 });
               }
 
-              // Get events
               if (data.events) {
                 Object.entries(data.events).forEach(([id, evt]) => {
                   optimizelyData.events.push({
@@ -195,18 +204,15 @@ module.exports = async (req, res) => {
                     name: evt.name,
                     apiName: evt.apiName,
                     category: evt.category,
-                    eventType: evt.eventType,
                   });
                 });
               }
             }
 
-            // Get visitor data
             const visitor = opt.get('visitor');
             if (visitor) {
               optimizelyData.visitor = {
                 visitorId: visitor.visitorId,
-                attributes: visitor.custom || {},
               };
             }
           }
@@ -230,7 +236,6 @@ module.exports = async (req, res) => {
         };
 
         try {
-          // Basic Shopify object
           if (window.Shopify) {
             shopifyData.shop = {
               name: window.Shopify.shop,
@@ -242,20 +247,16 @@ module.exports = async (req, res) => {
             shopifyData.theme = {
               id: window.Shopify.theme?.id,
               name: window.Shopify.theme?.name,
-              role: window.Shopify.theme?.role,
             };
 
-            // Check for checkout
             if (window.Shopify.Checkout) {
               shopifyData.checkout = {
                 step: window.Shopify.Checkout.step,
                 page: window.Shopify.Checkout.page,
-                token: window.Shopify.Checkout.token ? 'present' : null,
               };
             }
           }
 
-          // ShopifyAnalytics meta
           if (window.ShopifyAnalytics?.meta) {
             const meta = window.ShopifyAnalytics.meta;
             shopifyData.page = {
@@ -267,43 +268,15 @@ module.exports = async (req, res) => {
             if (meta.product) {
               shopifyData.product = {
                 id: meta.product.id,
-                gid: meta.product.gid,
                 vendor: meta.product.vendor,
                 type: meta.product.type,
-                variants:
-                  meta.product.variants?.map((v) => ({
-                    id: v.id,
-                    name: v.name,
-                    price: v.price,
-                    sku: v.sku,
-                    available: v.available,
-                  })) || [],
               };
             }
           }
 
-          // Cart data (if available)
-          if (window.theme?.cart || window.cart) {
-            const cart = window.theme?.cart || window.cart;
-            shopifyData.cart = {
-              itemCount: cart.item_count,
-              totalPrice: cart.total_price,
-              currency: cart.currency,
-              items:
-                cart.items?.map((item) => ({
-                  title: item.title,
-                  quantity: item.quantity,
-                  price: item.price,
-                  variant: item.variant_title,
-                })) || [],
-            };
-          }
-
-          // Customer state
           if (window.__st) {
             shopifyData.customer = {
-              loggedIn: window.__st.cid ? true : false,
-              customerId: window.__st.cid || null,
+              loggedIn: !!window.__st.cid,
             };
           }
         } catch (e) {
@@ -313,7 +286,7 @@ module.exports = async (req, res) => {
         result.shopify = shopifyData;
       }
 
-      // ===== GA4 / GOOGLE TAG MANAGER EXTRACTION =====
+      // ===== GA4 EXTRACTION =====
       const ga4Data = {
         detected: false,
         measurementIds: [],
@@ -322,65 +295,41 @@ module.exports = async (req, res) => {
       };
 
       try {
-        // Check for gtag
         if (window.gtag || window.dataLayer) {
           ga4Data.detected = true;
         }
 
-        // Find measurement IDs from various sources
-        if (window.google_tag_data?.uach) {
-          ga4Data.detected = true;
-        }
-
-        // Check for GA4 in scripts
-        const scripts = document.querySelectorAll(
-          'script[src*="googletagmanager"], script[src*="google-analytics"]'
-        );
+        const scripts = document.querySelectorAll('script[src*="googletagmanager"]');
         scripts.forEach((script) => {
           const src = script.src;
           const gMatch = src.match(/[?&]id=(G-[A-Z0-9]+)/);
           const gtmMatch = src.match(/[?&]id=(GTM-[A-Z0-9]+)/);
-          if (gMatch && !ga4Data.measurementIds.includes(gMatch[1])) {
-            ga4Data.measurementIds.push(gMatch[1]);
-            ga4Data.detected = true;
-          }
-          if (gtmMatch && !ga4Data.gtmContainers.includes(gtmMatch[1])) {
-            ga4Data.gtmContainers.push(gtmMatch[1]);
-            ga4Data.detected = true;
-          }
+          if (gMatch) ga4Data.measurementIds.push(gMatch[1]);
+          if (gtmMatch) ga4Data.gtmContainers.push(gtmMatch[1]);
         });
 
-        // Check inline scripts for measurement IDs
         document.querySelectorAll('script:not([src])').forEach((script) => {
-          const content = script.textContent;
-          const matches = content.match(/G-[A-Z0-9]{10,}/g);
-          if (matches) {
-            matches.forEach((id) => {
-              if (!ga4Data.measurementIds.includes(id)) {
-                ga4Data.measurementIds.push(id);
-                ga4Data.detected = true;
-              }
-            });
-          }
-          const gtmMatches = content.match(/GTM-[A-Z0-9]+/g);
-          if (gtmMatches) {
-            gtmMatches.forEach((id) => {
-              if (!ga4Data.gtmContainers.includes(id)) {
-                ga4Data.gtmContainers.push(id);
-                ga4Data.detected = true;
-              }
-            });
-          }
+          const content = script.textContent || '';
+          const gMatches = content.match(/G-[A-Z0-9]{10,}/g) || [];
+          const gtmMatches = content.match(/GTM-[A-Z0-9]+/g) || [];
+          gMatches.forEach((id) => {
+            if (!ga4Data.measurementIds.includes(id)) ga4Data.measurementIds.push(id);
+          });
+          gtmMatches.forEach((id) => {
+            if (!ga4Data.gtmContainers.includes(id)) ga4Data.gtmContainers.push(id);
+          });
         });
 
-        // Get dataLayer contents
+        if (ga4Data.measurementIds.length || ga4Data.gtmContainers.length) {
+          ga4Data.detected = true;
+        }
+
         if (window.dataLayer && Array.isArray(window.dataLayer)) {
-          ga4Data.dataLayerContents = window.dataLayer.slice(0, 50).map((item) => {
-            // Safely stringify, handling circular references
+          ga4Data.dataLayerContents = window.dataLayer.slice(0, 20).map((item) => {
             try {
               return JSON.parse(JSON.stringify(item));
             } catch {
-              return { event: item.event || 'unknown', error: 'Could not serialize' };
+              return { event: item.event || 'unknown' };
             }
           });
         }
@@ -393,9 +342,10 @@ module.exports = async (req, res) => {
       return result;
     }, MY_OPTIMIZELY_PROJECT_ID);
 
-    // Take screenshot
+    // Take screenshot (smaller size for speed)
     const screenshot = await page.screenshot({
-      type: 'png',
+      type: 'jpeg',
+      quality: 70,
       fullPage: false,
     });
     const screenshotBase64 = screenshot.toString('base64');
@@ -405,19 +355,18 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       success: true,
       data: extractedData,
-      screenshot: `data:image/png;base64,${screenshotBase64}`,
-      ga4NetworkRequests: ga4Requests.slice(0, 20),
+      screenshot: `data:image/jpeg;base64,${screenshotBase64}`,
+      ga4NetworkRequests: ga4Requests.slice(0, 10),
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     if (browser) {
-      await browser.close();
+      try { await browser.close(); } catch (e) {}
     }
 
     return res.status(500).json({
       success: false,
       error: error.message,
-      details: error.stack,
     });
   }
 };
