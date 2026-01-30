@@ -4,10 +4,6 @@ const puppeteer = require('puppeteer-core');
 // Hardcoded Optimizely Project ID for filtering
 const MY_OPTIMIZELY_PROJECT_ID = '30018331732';
 
-// Optimize Chromium for faster cold starts
-chromium.setHeadlessMode = true;
-chromium.setGraphicsMode = false;
-
 module.exports = async (req, res) => {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -42,62 +38,34 @@ module.exports = async (req, res) => {
   let browser = null;
 
   try {
-    // Launch browser with minimal args for faster startup
+    // Get executable path
+    const executablePath = await chromium.executablePath();
+
+    // Launch browser
     browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--single-process',
-        '--no-zygote',
-      ],
-      defaultViewport: { width: 1280, height: 720 },
-      executablePath: await chromium.executablePath(),
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
       headless: chromium.headless,
     });
 
     const page = await browser.newPage();
 
-    // Block unnecessary resources for faster loading
-    await page.setRequestInterception(true);
-    page.on('request', (request) => {
-      const resourceType = request.resourceType();
-      if (['image', 'media', 'font'].includes(resourceType)) {
-        request.abort();
-      } else {
-        request.continue();
-      }
-    });
+    await page.setViewport({ width: 1280, height: 720 });
 
     // Set user agent
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
 
-    // Collect network requests for GA4 detection
-    const ga4Requests = [];
-    page.on('request', (request) => {
-      const reqUrl = request.url();
-      if (
-        reqUrl.includes('google-analytics.com') ||
-        reqUrl.includes('googletagmanager.com') ||
-        reqUrl.includes('analytics.google.com')
-      ) {
-        ga4Requests.push({
-          url: reqUrl,
-          method: request.method(),
-        });
-      }
-    });
-
-    // Navigate to URL with shorter timeout
+    // Navigate to URL
     await page.goto(targetUrl.href, {
       waitUntil: 'domcontentloaded',
-      timeout: 20000,
+      timeout: 25000,
     });
 
-    // Short wait for scripts to initialize
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // Wait for scripts to initialize
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Extract all data from the page
     const extractedData = await page.evaluate((projectId) => {
@@ -105,7 +73,6 @@ module.exports = async (req, res) => {
         optimizely: null,
         shopify: null,
         ga4: null,
-        dataLayer: null,
         pageInfo: {
           title: document.title,
           url: window.location.href,
@@ -118,7 +85,6 @@ module.exports = async (req, res) => {
         const optimizelyData = {
           projectId: null,
           isMyProject: false,
-          state: null,
           experiments: [],
           audiences: [],
           pages: [],
@@ -128,13 +94,12 @@ module.exports = async (req, res) => {
         try {
           if (opt.get) {
             const state = opt.get('state');
+            let activeExperiments = [];
+            let variationMap = {};
+
             if (state) {
-              optimizelyData.state = {
-                activeExperiments: state.getActiveExperimentIds
-                  ? state.getActiveExperimentIds()
-                  : [],
-                variationMap: state.getVariationMap ? state.getVariationMap() : {},
-              };
+              activeExperiments = state.getActiveExperimentIds ? state.getActiveExperimentIds() : [];
+              variationMap = state.getVariationMap ? state.getVariationMap() : {};
             }
 
             const data = opt.get('data');
@@ -152,12 +117,10 @@ module.exports = async (req, res) => {
                     status: exp.status || 'unknown',
                     variations: [],
                     audiences: exp.audienceIds || [],
-                    trafficAllocation: exp.trafficAllocation || null,
                     percentageIncluded: exp.percentageIncluded || null,
-                    metrics: exp.metrics || [],
                     holdback: exp.holdback || 0,
-                    isActive: optimizelyData.state?.activeExperiments?.includes(id),
-                    currentVariation: optimizelyData.state?.variationMap?.[id]?.id || null,
+                    isActive: activeExperiments.includes(id),
+                    currentVariation: variationMap[id]?.id || null,
                   };
 
                   if (exp.variations) {
@@ -166,7 +129,6 @@ module.exports = async (req, res) => {
                         id: varId,
                         name: variation.name,
                         weight: variation.weight || null,
-                        isControl: variation.isControl || false,
                         isCurrent: varId === experiment.currentVariation,
                       });
                     });
@@ -178,42 +140,26 @@ module.exports = async (req, res) => {
 
               if (data.audiences) {
                 Object.entries(data.audiences).forEach(([id, aud]) => {
-                  optimizelyData.audiences.push({
-                    id,
-                    name: aud.name,
-                    conditions: aud.conditions || null,
-                  });
+                  optimizelyData.audiences.push({ id, name: aud.name });
                 });
               }
 
               if (data.pages) {
                 Object.entries(data.pages).forEach(([id, pg]) => {
-                  optimizelyData.pages.push({
-                    id,
-                    name: pg.name,
-                    apiName: pg.apiName,
-                    category: pg.category,
-                  });
+                  optimizelyData.pages.push({ id, name: pg.name, apiName: pg.apiName });
                 });
               }
 
               if (data.events) {
                 Object.entries(data.events).forEach(([id, evt]) => {
-                  optimizelyData.events.push({
-                    id,
-                    name: evt.name,
-                    apiName: evt.apiName,
-                    category: evt.category,
-                  });
+                  optimizelyData.events.push({ id, name: evt.name, apiName: evt.apiName });
                 });
               }
             }
 
             const visitor = opt.get('visitor');
             if (visitor) {
-              optimizelyData.visitor = {
-                visitorId: visitor.visitorId,
-              };
+              optimizelyData.visitor = { visitorId: visitor.visitorId };
             }
           }
         } catch (e) {
@@ -225,15 +171,7 @@ module.exports = async (req, res) => {
 
       // ===== SHOPIFY EXTRACTION =====
       if (window.Shopify || window.ShopifyAnalytics) {
-        const shopifyData = {
-          detected: true,
-          shop: null,
-          cart: null,
-          customer: null,
-          product: null,
-          checkout: null,
-          theme: null,
-        };
+        const shopifyData = { detected: true };
 
         try {
           if (window.Shopify) {
@@ -275,9 +213,7 @@ module.exports = async (req, res) => {
           }
 
           if (window.__st) {
-            shopifyData.customer = {
-              loggedIn: !!window.__st.cid,
-            };
+            shopifyData.customer = { loggedIn: !!window.__st.cid };
           }
         } catch (e) {
           shopifyData.error = e.message;
@@ -304,8 +240,12 @@ module.exports = async (req, res) => {
           const src = script.src;
           const gMatch = src.match(/[?&]id=(G-[A-Z0-9]+)/);
           const gtmMatch = src.match(/[?&]id=(GTM-[A-Z0-9]+)/);
-          if (gMatch) ga4Data.measurementIds.push(gMatch[1]);
-          if (gtmMatch) ga4Data.gtmContainers.push(gtmMatch[1]);
+          if (gMatch && !ga4Data.measurementIds.includes(gMatch[1])) {
+            ga4Data.measurementIds.push(gMatch[1]);
+          }
+          if (gtmMatch && !ga4Data.gtmContainers.includes(gtmMatch[1])) {
+            ga4Data.gtmContainers.push(gtmMatch[1]);
+          }
         });
 
         document.querySelectorAll('script:not([src])').forEach((script) => {
@@ -325,7 +265,7 @@ module.exports = async (req, res) => {
         }
 
         if (window.dataLayer && Array.isArray(window.dataLayer)) {
-          ga4Data.dataLayerContents = window.dataLayer.slice(0, 20).map((item) => {
+          ga4Data.dataLayerContents = window.dataLayer.slice(0, 15).map((item) => {
             try {
               return JSON.parse(JSON.stringify(item));
             } catch {
@@ -342,11 +282,10 @@ module.exports = async (req, res) => {
       return result;
     }, MY_OPTIMIZELY_PROJECT_ID);
 
-    // Take screenshot (smaller size for speed)
+    // Take screenshot
     const screenshot = await page.screenshot({
       type: 'jpeg',
-      quality: 70,
-      fullPage: false,
+      quality: 60,
     });
     const screenshotBase64 = screenshot.toString('base64');
 
@@ -356,7 +295,6 @@ module.exports = async (req, res) => {
       success: true,
       data: extractedData,
       screenshot: `data:image/jpeg;base64,${screenshotBase64}`,
-      ga4NetworkRequests: ga4Requests.slice(0, 10),
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
