@@ -1,5 +1,5 @@
-const chromium = require('@sparticuz/chromium-min');
-const playwright = require('playwright-core');
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
 
 // Hardcoded Optimizely Project ID for filtering
 const MY_OPTIMIZELY_PROJECT_ID = '30018331732';
@@ -38,31 +38,33 @@ module.exports = async (req, res) => {
   let browser = null;
 
   try {
-    // Launch browser with Chromium
-    const executablePath = await chromium.executablePath(
-      'https://github.com/nicholasgriffintn/playwright-aws-lambda/releases/download/v1.0.8/chromium-v127.0.1-pack.tar'
-    );
-
-    browser = await playwright.chromium.launch({
+    // Launch browser with Chromium optimized for serverless
+    browser = await puppeteer.launch({
       args: chromium.args,
-      executablePath,
-      headless: true,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 720 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    });
+    const page = await browser.newPage();
 
-    const page = await context.newPage();
+    // Set viewport
+    await page.setViewport({ width: 1280, height: 720 });
+
+    // Set user agent
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
 
     // Collect network requests for GA4 detection
     const ga4Requests = [];
     page.on('request', (request) => {
       const reqUrl = request.url();
-      if (reqUrl.includes('google-analytics.com') ||
-          reqUrl.includes('googletagmanager.com') ||
-          reqUrl.includes('analytics.google.com')) {
+      if (
+        reqUrl.includes('google-analytics.com') ||
+        reqUrl.includes('googletagmanager.com') ||
+        reqUrl.includes('analytics.google.com')
+      ) {
         ga4Requests.push({
           url: reqUrl,
           method: request.method(),
@@ -72,12 +74,12 @@ module.exports = async (req, res) => {
 
     // Navigate to URL with timeout
     await page.goto(targetUrl.href, {
-      waitUntil: 'networkidle',
+      waitUntil: 'networkidle2',
       timeout: 30000,
     });
 
     // Wait a bit for any lazy-loaded scripts
-    await page.waitForTimeout(2000);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Extract all data from the page
     const extractedData = await page.evaluate((projectId) => {
@@ -111,7 +113,9 @@ module.exports = async (req, res) => {
             const state = opt.get('state');
             if (state) {
               optimizelyData.state = {
-                activeExperiments: state.getActiveExperimentIds ? state.getActiveExperimentIds() : [],
+                activeExperiments: state.getActiveExperimentIds
+                  ? state.getActiveExperimentIds()
+                  : [],
                 variationMap: state.getVariationMap ? state.getVariationMap() : {},
               };
             }
@@ -136,8 +140,10 @@ module.exports = async (req, res) => {
                     percentageIncluded: exp.percentageIncluded || null,
                     metrics: exp.metrics || [],
                     holdback: exp.holdback || 0,
-                    isActive: optimizelyData.state?.activeExperiments?.includes(id),
-                    currentVariation: optimizelyData.state?.variationMap?.[id]?.id || null,
+                    isActive:
+                      optimizelyData.state?.activeExperiments?.includes(id),
+                    currentVariation:
+                      optimizelyData.state?.variationMap?.[id]?.id || null,
                   };
 
                   // Get variations
@@ -264,13 +270,14 @@ module.exports = async (req, res) => {
                 gid: meta.product.gid,
                 vendor: meta.product.vendor,
                 type: meta.product.type,
-                variants: meta.product.variants?.map(v => ({
-                  id: v.id,
-                  name: v.name,
-                  price: v.price,
-                  sku: v.sku,
-                  available: v.available,
-                })) || [],
+                variants:
+                  meta.product.variants?.map((v) => ({
+                    id: v.id,
+                    name: v.name,
+                    price: v.price,
+                    sku: v.sku,
+                    available: v.available,
+                  })) || [],
               };
             }
           }
@@ -282,12 +289,13 @@ module.exports = async (req, res) => {
               itemCount: cart.item_count,
               totalPrice: cart.total_price,
               currency: cart.currency,
-              items: cart.items?.map(item => ({
-                title: item.title,
-                quantity: item.quantity,
-                price: item.price,
-                variant: item.variant_title,
-              })) || [],
+              items:
+                cart.items?.map((item) => ({
+                  title: item.title,
+                  quantity: item.quantity,
+                  price: item.price,
+                  variant: item.variant_title,
+                })) || [],
             };
           }
 
@@ -298,7 +306,6 @@ module.exports = async (req, res) => {
               customerId: window.__st.cid || null,
             };
           }
-
         } catch (e) {
           shopifyData.error = e.message;
         }
@@ -326,8 +333,10 @@ module.exports = async (req, res) => {
         }
 
         // Check for GA4 in scripts
-        const scripts = document.querySelectorAll('script[src*="googletagmanager"], script[src*="google-analytics"]');
-        scripts.forEach(script => {
+        const scripts = document.querySelectorAll(
+          'script[src*="googletagmanager"], script[src*="google-analytics"]'
+        );
+        scripts.forEach((script) => {
           const src = script.src;
           const gMatch = src.match(/[?&]id=(G-[A-Z0-9]+)/);
           const gtmMatch = src.match(/[?&]id=(GTM-[A-Z0-9]+)/);
@@ -342,11 +351,11 @@ module.exports = async (req, res) => {
         });
 
         // Check inline scripts for measurement IDs
-        document.querySelectorAll('script:not([src])').forEach(script => {
+        document.querySelectorAll('script:not([src])').forEach((script) => {
           const content = script.textContent;
           const matches = content.match(/G-[A-Z0-9]{10,}/g);
           if (matches) {
-            matches.forEach(id => {
+            matches.forEach((id) => {
               if (!ga4Data.measurementIds.includes(id)) {
                 ga4Data.measurementIds.push(id);
                 ga4Data.detected = true;
@@ -355,7 +364,7 @@ module.exports = async (req, res) => {
           }
           const gtmMatches = content.match(/GTM-[A-Z0-9]+/g);
           if (gtmMatches) {
-            gtmMatches.forEach(id => {
+            gtmMatches.forEach((id) => {
               if (!ga4Data.gtmContainers.includes(id)) {
                 ga4Data.gtmContainers.push(id);
                 ga4Data.detected = true;
@@ -366,7 +375,7 @@ module.exports = async (req, res) => {
 
         // Get dataLayer contents
         if (window.dataLayer && Array.isArray(window.dataLayer)) {
-          ga4Data.dataLayerContents = window.dataLayer.slice(0, 50).map(item => {
+          ga4Data.dataLayerContents = window.dataLayer.slice(0, 50).map((item) => {
             // Safely stringify, handling circular references
             try {
               return JSON.parse(JSON.stringify(item));
@@ -375,7 +384,6 @@ module.exports = async (req, res) => {
             }
           });
         }
-
       } catch (e) {
         ga4Data.error = e.message;
       }
@@ -401,7 +409,6 @@ module.exports = async (req, res) => {
       ga4NetworkRequests: ga4Requests.slice(0, 20),
       timestamp: new Date().toISOString(),
     });
-
   } catch (error) {
     if (browser) {
       await browser.close();
