@@ -1,0 +1,8 @@
+{
+  "name": "optimizely-inspector-api",
+  "private": true,
+  "dependencies": {
+    "@sparticuz/chromium-min": "^127.0.0",
+    "playwright-core": "^1.40.0"
+  }
+}

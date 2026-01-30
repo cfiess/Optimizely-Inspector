@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
+  "functions": {
+    "api/inspect.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/((?!api).*)", "destination": "/index.html" }
+  ]
+}
