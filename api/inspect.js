@@ -5,7 +5,7 @@ const puppeteer = require('puppeteer-core');
 const MY_OPTIMIZELY_PROJECT_ID = '30018331732';
 
 // Remote Chromium URL - downloaded at runtime to avoid 250MB bundle limit
-const CHROMIUM_URL = 'https://github.com/nicholasgriffintn/chromium-for-vercel/releases/download/v119.0.0/chromium-v119.0.0-pack.tar';
+const CHROMIUM_URL = 'https://github.com/Sparticuz/chromium/releases/download/v119.0.2/chromium-v119.0.2-pack.tar';
 
 module.exports = async (req, res) => {
   // Enable CORS
