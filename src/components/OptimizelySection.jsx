@@ -68,11 +68,29 @@ function OptimizelySection({ data }) {
               <span className="kv-value">{data.datafile.revision}</span>
             </div>
           )}
+          {data.loadedVia && (
+            <div className="kv-row">
+              <span className="kv-key">Loaded Via</span>
+              <span className="kv-value">
+                {data.loadedVia === 'direct' && 'Direct script tag'}
+                {data.loadedVia === 'gtm' && 'Google Tag Manager'}
+                {data.loadedVia === 'known_project' && 'Known project ID'}
+              </span>
+            </div>
+          )}
           {data.snippetUrls?.length > 0 && (
             <div className="kv-row">
               <span className="kv-key">Snippet</span>
               <span className="kv-value" style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>
                 {data.snippetUrls[0]}
+              </span>
+            </div>
+          )}
+          {data.datafile?.datafileUrl && (
+            <div className="kv-row">
+              <span className="kv-key">Datafile</span>
+              <span className="kv-value" style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>
+                {data.datafile.datafileUrl}
               </span>
             </div>
           )}

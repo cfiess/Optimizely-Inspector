@@ -53,7 +53,7 @@ function App() {
     <div className="app">
       <header className="header">
         <div className="header-content">
-          <span className="version">v2.0</span>
+          <span className="version">v2.1</span>
           <div className="logo">
             <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect width="32" height="32" rx="8" fill="#0037FF"/>
