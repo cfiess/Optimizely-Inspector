@@ -1,11 +1,8 @@
-const chromium = require('@sparticuz/chromium-min');
-const puppeteer = require('puppeteer-core');
+const fetch = require('node-fetch');
+const cheerio = require('cheerio');
 
 // Hardcoded Optimizely Project ID for filtering
 const MY_OPTIMIZELY_PROJECT_ID = '30018331732';
-
-// Remote Chromium URL - downloaded at runtime to avoid 250MB bundle limit
-const CHROMIUM_URL = 'https://github.com/Sparticuz/chromium/releases/download/v119.0.2/chromium-v119.0.2-pack.tar';
 
 module.exports = async (req, res) => {
   // Enable CORS
@@ -38,272 +35,351 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Invalid URL provided' });
   }
 
-  let browser = null;
-
   try {
-    // Get executable path - downloads chromium at runtime
-    const executablePath = await chromium.executablePath(CHROMIUM_URL);
-
-    // Launch browser
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath,
-      headless: chromium.headless,
+    // Fetch the page HTML
+    const response = await fetch(targetUrl.href, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      },
+      timeout: 15000,
+      redirect: 'follow',
     });
 
-    const page = await browser.newPage();
+    if (!response.ok) {
+      throw new Error(`Failed to fetch page: ${response.status} ${response.statusText}`);
+    }
 
-    await page.setViewport({ width: 1280, height: 720 });
+    const html = await response.text();
+    const $ = cheerio.load(html);
 
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-    );
+    const result = {
+      optimizely: null,
+      shopify: null,
+      ga4: null,
+      pageInfo: {
+        title: $('title').text() || '',
+        url: targetUrl.href,
+        description: $('meta[name="description"]').attr('content') || '',
+      },
+    };
 
-    // Navigate to URL
-    await page.goto(targetUrl.href, {
-      waitUntil: 'domcontentloaded',
-      timeout: 25000,
+    // ===== OPTIMIZELY DETECTION =====
+    const optimizelyData = {
+      detected: false,
+      projectIds: [],
+      snippetUrls: [],
+      datafile: null,
+      experiments: [],
+      audiences: [],
+      pages: [],
+      events: [],
+      isMyProject: false,
+    };
+
+    // Find Optimizely script tags
+    $('script[src*="optimizely.com"], script[src*="optimizelyCDN"]').each((i, el) => {
+      const src = $(el).attr('src');
+      if (src) {
+        optimizelyData.snippetUrls.push(src);
+        optimizelyData.detected = true;
+
+        // Extract project ID from URL
+        const projectMatch = src.match(/\/(\d{10,})\.js/);
+        if (projectMatch && !optimizelyData.projectIds.includes(projectMatch[1])) {
+          optimizelyData.projectIds.push(projectMatch[1]);
+        }
+      }
     });
 
-    // Wait for scripts to initialize
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Also check inline scripts for Optimizely
+    $('script:not([src])').each((i, el) => {
+      const content = $(el).html() || '';
 
-    // Extract all data from the page
-    const extractedData = await page.evaluate((projectId) => {
-      const result = {
-        optimizely: null,
-        shopify: null,
-        ga4: null,
-        pageInfo: {
-          title: document.title,
-          url: window.location.href,
-        },
-      };
-
-      // ===== OPTIMIZELY EXTRACTION =====
-      if (window.optimizely) {
-        const opt = window.optimizely;
-        const optimizelyData = {
-          projectId: null,
-          isMyProject: false,
-          experiments: [],
-          audiences: [],
-          pages: [],
-          events: [],
-        };
-
-        try {
-          if (opt.get) {
-            const state = opt.get('state');
-            let activeExperiments = [];
-            let variationMap = {};
-
-            if (state) {
-              activeExperiments = state.getActiveExperimentIds ? state.getActiveExperimentIds() : [];
-              variationMap = state.getVariationMap ? state.getVariationMap() : {};
-            }
-
-            const data = opt.get('data');
-            if (data) {
-              optimizelyData.projectId = data.projectId;
-              optimizelyData.isMyProject = data.projectId === projectId;
-              optimizelyData.revision = data.revision;
-              optimizelyData.accountId = data.accountId;
-
-              if (data.experiments) {
-                Object.entries(data.experiments).forEach(([id, exp]) => {
-                  const experiment = {
-                    id,
-                    name: exp.name,
-                    status: exp.status || 'unknown',
-                    variations: [],
-                    audiences: exp.audienceIds || [],
-                    percentageIncluded: exp.percentageIncluded || null,
-                    holdback: exp.holdback || 0,
-                    isActive: activeExperiments.includes(id),
-                    currentVariation: variationMap[id]?.id || null,
-                  };
-
-                  if (exp.variations) {
-                    Object.entries(exp.variations).forEach(([varId, variation]) => {
-                      experiment.variations.push({
-                        id: varId,
-                        name: variation.name,
-                        weight: variation.weight || null,
-                        isCurrent: varId === experiment.currentVariation,
-                      });
-                    });
-                  }
-
-                  optimizelyData.experiments.push(experiment);
-                });
-              }
-
-              if (data.audiences) {
-                Object.entries(data.audiences).forEach(([id, aud]) => {
-                  optimizelyData.audiences.push({ id, name: aud.name });
-                });
-              }
-
-              if (data.pages) {
-                Object.entries(data.pages).forEach(([id, pg]) => {
-                  optimizelyData.pages.push({ id, name: pg.name, apiName: pg.apiName });
-                });
-              }
-
-              if (data.events) {
-                Object.entries(data.events).forEach(([id, evt]) => {
-                  optimizelyData.events.push({ id, name: evt.name, apiName: evt.apiName });
-                });
-              }
-            }
-
-            const visitor = opt.get('visitor');
-            if (visitor) {
-              optimizelyData.visitor = { visitorId: visitor.visitorId };
-            }
+      // Look for Optimizely project IDs in inline scripts
+      const projectMatches = content.match(/optimizely\.com\/js\/(\d{10,})\.js/g);
+      if (projectMatches) {
+        projectMatches.forEach(match => {
+          const id = match.match(/(\d{10,})/)?.[1];
+          if (id && !optimizelyData.projectIds.includes(id)) {
+            optimizelyData.projectIds.push(id);
+            optimizelyData.detected = true;
           }
-        } catch (e) {
-          optimizelyData.error = e.message;
-        }
-
-        result.optimizely = optimizelyData;
+        });
       }
+    });
 
-      // ===== SHOPIFY EXTRACTION =====
-      if (window.Shopify || window.ShopifyAnalytics) {
-        const shopifyData = { detected: true };
+    // Check if it's our project
+    if (optimizelyData.projectIds.includes(MY_OPTIMIZELY_PROJECT_ID)) {
+      optimizelyData.isMyProject = true;
+    }
 
-        try {
-          if (window.Shopify) {
-            shopifyData.shop = {
-              name: window.Shopify.shop,
-              currency: window.Shopify.currency?.active,
-              locale: window.Shopify.locale,
-              country: window.Shopify.country,
-            };
-
-            shopifyData.theme = {
-              id: window.Shopify.theme?.id,
-              name: window.Shopify.theme?.name,
-            };
-
-            if (window.Shopify.Checkout) {
-              shopifyData.checkout = {
-                step: window.Shopify.Checkout.step,
-                page: window.Shopify.Checkout.page,
-              };
-            }
-          }
-
-          if (window.ShopifyAnalytics?.meta) {
-            const meta = window.ShopifyAnalytics.meta;
-            shopifyData.page = {
-              type: meta.page?.pageType,
-              resourceType: meta.page?.resourceType,
-              resourceId: meta.page?.resourceId,
-            };
-
-            if (meta.product) {
-              shopifyData.product = {
-                id: meta.product.id,
-                vendor: meta.product.vendor,
-                type: meta.product.type,
-              };
-            }
-          }
-
-          if (window.__st) {
-            shopifyData.customer = { loggedIn: !!window.__st.cid };
-          }
-        } catch (e) {
-          shopifyData.error = e.message;
-        }
-
-        result.shopify = shopifyData;
-      }
-
-      // ===== GA4 EXTRACTION =====
-      const ga4Data = {
-        detected: false,
-        measurementIds: [],
-        gtmContainers: [],
-        dataLayerContents: [],
-      };
-
+    // Fetch Optimizely datafile for each project
+    for (const projectId of optimizelyData.projectIds) {
       try {
-        if (window.gtag || window.dataLayer) {
-          ga4Data.detected = true;
-        }
+        // Try to fetch the datafile from Optimizely CDN
+        const datafileUrl = `https://cdn.optimizely.com/datafiles/${projectId}.json`;
+        const datafileResponse = await fetch(datafileUrl, { timeout: 5000 });
 
-        const scripts = document.querySelectorAll('script[src*="googletagmanager"]');
-        scripts.forEach((script) => {
-          const src = script.src;
-          const gMatch = src.match(/[?&]id=(G-[A-Z0-9]+)/);
-          const gtmMatch = src.match(/[?&]id=(GTM-[A-Z0-9]+)/);
-          if (gMatch && !ga4Data.measurementIds.includes(gMatch[1])) {
-            ga4Data.measurementIds.push(gMatch[1]);
+        if (datafileResponse.ok) {
+          const datafile = await datafileResponse.json();
+          optimizelyData.datafile = {
+            projectId: datafile.projectId || projectId,
+            revision: datafile.revision,
+            version: datafile.version,
+          };
+
+          // Extract experiments
+          if (datafile.experiments) {
+            datafile.experiments.forEach(exp => {
+              optimizelyData.experiments.push({
+                id: exp.id,
+                key: exp.key,
+                status: exp.status,
+                variations: exp.variations?.map(v => ({
+                  id: v.id,
+                  key: v.key,
+                })) || [],
+                trafficAllocation: exp.trafficAllocation,
+              });
+            });
           }
-          if (gtmMatch && !ga4Data.gtmContainers.includes(gtmMatch[1])) {
-            ga4Data.gtmContainers.push(gtmMatch[1]);
+
+          // Extract feature flags
+          if (datafile.featureFlags) {
+            datafile.featureFlags.forEach(ff => {
+              optimizelyData.experiments.push({
+                id: ff.id,
+                key: ff.key,
+                type: 'feature_flag',
+                variables: ff.variables?.map(v => ({ key: v.key, type: v.type })) || [],
+              });
+            });
           }
-        });
 
-        document.querySelectorAll('script:not([src])').forEach((script) => {
-          const content = script.textContent || '';
-          const gMatches = content.match(/G-[A-Z0-9]{10,}/g) || [];
-          const gtmMatches = content.match(/GTM-[A-Z0-9]+/g) || [];
-          gMatches.forEach((id) => {
-            if (!ga4Data.measurementIds.includes(id)) ga4Data.measurementIds.push(id);
-          });
-          gtmMatches.forEach((id) => {
-            if (!ga4Data.gtmContainers.includes(id)) ga4Data.gtmContainers.push(id);
-          });
-        });
+          // Extract audiences
+          if (datafile.audiences) {
+            datafile.audiences.forEach(aud => {
+              optimizelyData.audiences.push({
+                id: aud.id,
+                name: aud.name,
+              });
+            });
+          }
 
-        if (ga4Data.measurementIds.length || ga4Data.gtmContainers.length) {
-          ga4Data.detected = true;
-        }
-
-        if (window.dataLayer && Array.isArray(window.dataLayer)) {
-          ga4Data.dataLayerContents = window.dataLayer.slice(0, 15).map((item) => {
-            try {
-              return JSON.parse(JSON.stringify(item));
-            } catch {
-              return { event: item.event || 'unknown' };
-            }
-          });
+          // Extract events
+          if (datafile.events) {
+            datafile.events.forEach(evt => {
+              optimizelyData.events.push({
+                id: evt.id,
+                key: evt.key,
+              });
+            });
+          }
         }
       } catch (e) {
-        ga4Data.error = e.message;
+        // Datafile fetch failed, continue with what we have
+        console.log(`Could not fetch datafile for project ${projectId}`);
       }
 
-      result.ga4 = ga4Data;
+      // Also try the Web snippet datafile format
+      try {
+        const snippetDataUrl = `https://cdn.optimizely.com/json/${projectId}.json`;
+        const snippetResponse = await fetch(snippetDataUrl, { timeout: 5000 });
 
-      return result;
-    }, MY_OPTIMIZELY_PROJECT_ID);
+        if (snippetResponse.ok) {
+          const snippetData = await snippetResponse.json();
 
-    // Take screenshot
-    const screenshot = await page.screenshot({
-      type: 'jpeg',
-      quality: 60,
+          if (snippetData.experiments && !optimizelyData.experiments.length) {
+            Object.entries(snippetData.experiments).forEach(([id, exp]) => {
+              optimizelyData.experiments.push({
+                id,
+                name: exp.name,
+                status: exp.status,
+                percentageIncluded: exp.percentageIncluded,
+                variations: exp.variations ? Object.entries(exp.variations).map(([vid, v]) => ({
+                  id: vid,
+                  name: v.name,
+                  weight: v.weight,
+                })) : [],
+              });
+            });
+          }
+
+          if (snippetData.audiences && !optimizelyData.audiences.length) {
+            Object.entries(snippetData.audiences).forEach(([id, aud]) => {
+              optimizelyData.audiences.push({
+                id,
+                name: aud.name,
+              });
+            });
+          }
+
+          if (snippetData.pages) {
+            Object.entries(snippetData.pages).forEach(([id, page]) => {
+              optimizelyData.pages.push({
+                id,
+                name: page.name,
+                apiName: page.apiName,
+              });
+            });
+          }
+
+          if (snippetData.events) {
+            Object.entries(snippetData.events).forEach(([id, evt]) => {
+              optimizelyData.events.push({
+                id,
+                name: evt.name,
+                apiName: evt.apiName,
+              });
+            });
+          }
+
+          optimizelyData.datafile = {
+            projectId,
+            accountId: snippetData.accountId,
+            revision: snippetData.revision,
+          };
+        }
+      } catch (e) {
+        // Snippet data fetch failed
+      }
+    }
+
+    if (optimizelyData.detected) {
+      result.optimizely = optimizelyData;
+    }
+
+    // ===== SHOPIFY DETECTION =====
+    const shopifyData = {
+      detected: false,
+      shop: null,
+      theme: null,
+      page: null,
+    };
+
+    // Check for Shopify indicators
+    const hasShopifyScript = $('script[src*="cdn.shopify.com"]').length > 0;
+    const hasShopifyMeta = $('meta[name="shopify-checkout-api-token"]').length > 0;
+    const hasShopifyLink = $('link[href*="cdn.shopify.com"]').length > 0;
+
+    // Check inline scripts for Shopify object
+    let shopifyInlineDetected = false;
+    $('script:not([src])').each((i, el) => {
+      const content = $(el).html() || '';
+      if (content.includes('Shopify.') || content.includes('window.Shopify')) {
+        shopifyInlineDetected = true;
+
+        // Try to extract shop name
+        const shopMatch = content.match(/Shopify\.shop\s*=\s*["']([^"']+)["']/);
+        if (shopMatch) {
+          shopifyData.shop = { name: shopMatch[1] };
+        }
+
+        // Try to extract currency
+        const currencyMatch = content.match(/Shopify\.currency\.active\s*=\s*["']([^"']+)["']/);
+        if (currencyMatch && shopifyData.shop) {
+          shopifyData.shop.currency = currencyMatch[1];
+        }
+
+        // Try to extract locale
+        const localeMatch = content.match(/Shopify\.locale\s*=\s*["']([^"']+)["']/);
+        if (localeMatch && shopifyData.shop) {
+          shopifyData.shop.locale = localeMatch[1];
+        }
+      }
     });
-    const screenshotBase64 = screenshot.toString('base64');
 
-    await browser.close();
+    if (hasShopifyScript || hasShopifyMeta || hasShopifyLink || shopifyInlineDetected) {
+      shopifyData.detected = true;
+
+      // Try to get theme info from meta
+      const themeId = $('script[data-theme-id]').attr('data-theme-id');
+      if (themeId) {
+        shopifyData.theme = { id: themeId };
+      }
+
+      // Detect page type
+      const bodyClass = $('body').attr('class') || '';
+      if (bodyClass.includes('template-product')) {
+        shopifyData.page = { type: 'product' };
+      } else if (bodyClass.includes('template-collection')) {
+        shopifyData.page = { type: 'collection' };
+      } else if (bodyClass.includes('template-cart')) {
+        shopifyData.page = { type: 'cart' };
+      } else if (bodyClass.includes('template-index')) {
+        shopifyData.page = { type: 'home' };
+      }
+
+      result.shopify = shopifyData;
+    }
+
+    // ===== GA4 / GTM DETECTION =====
+    const ga4Data = {
+      detected: false,
+      measurementIds: [],
+      gtmContainers: [],
+    };
+
+    // Find GA4 and GTM in script tags
+    $('script[src*="googletagmanager.com"], script[src*="google-analytics.com"]').each((i, el) => {
+      const src = $(el).attr('src') || '';
+
+      // GA4 measurement IDs
+      const ga4Match = src.match(/[?&]id=(G-[A-Z0-9]+)/);
+      if (ga4Match && !ga4Data.measurementIds.includes(ga4Match[1])) {
+        ga4Data.measurementIds.push(ga4Match[1]);
+        ga4Data.detected = true;
+      }
+
+      // GTM container IDs
+      const gtmMatch = src.match(/[?&]id=(GTM-[A-Z0-9]+)/);
+      if (gtmMatch && !ga4Data.gtmContainers.includes(gtmMatch[1])) {
+        ga4Data.gtmContainers.push(gtmMatch[1]);
+        ga4Data.detected = true;
+      }
+    });
+
+    // Check inline scripts for GA4/GTM
+    $('script:not([src])').each((i, el) => {
+      const content = $(el).html() || '';
+
+      // Find GA4 measurement IDs
+      const ga4Matches = content.match(/G-[A-Z0-9]{10,}/g);
+      if (ga4Matches) {
+        ga4Matches.forEach(id => {
+          if (!ga4Data.measurementIds.includes(id)) {
+            ga4Data.measurementIds.push(id);
+            ga4Data.detected = true;
+          }
+        });
+      }
+
+      // Find GTM container IDs
+      const gtmMatches = content.match(/GTM-[A-Z0-9]+/g);
+      if (gtmMatches) {
+        gtmMatches.forEach(id => {
+          if (!ga4Data.gtmContainers.includes(id)) {
+            ga4Data.gtmContainers.push(id);
+            ga4Data.detected = true;
+          }
+        });
+      }
+    });
+
+    if (ga4Data.detected) {
+      result.ga4 = ga4Data;
+    }
 
     return res.status(200).json({
       success: true,
-      data: extractedData,
-      screenshot: `data:image/jpeg;base64,${screenshotBase64}`,
+      data: result,
+      method: 'fetch', // Indicate this is fetch-based, no screenshot
       timestamp: new Date().toISOString(),
     });
-  } catch (error) {
-    if (browser) {
-      try { await browser.close(); } catch (e) {}
-    }
 
+  } catch (error) {
     return res.status(500).json({
       success: false,
       error: error.message,

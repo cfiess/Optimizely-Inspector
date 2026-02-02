@@ -5,7 +5,7 @@ const MY_PROJECT_ID = '30018331732';
 function OptimizelySection({ data }) {
   const [collapsed, setCollapsed] = useState(false);
 
-  if (!data) {
+  if (!data || !data.detected) {
     return (
       <div className="section-card">
         <div className="section-header" onClick={() => setCollapsed(!collapsed)}>
@@ -25,8 +25,9 @@ function OptimizelySection({ data }) {
     );
   }
 
-  const activeExperiments = data.experiments?.filter(e => e.isActive) || [];
-  const isMyProject = data.projectId === MY_PROJECT_ID;
+  const projectId = data.datafile?.projectId || data.projectIds?.[0] || 'Unknown';
+  const isMyProject = data.isMyProject || data.projectIds?.includes(MY_PROJECT_ID);
+  const experimentCount = data.experiments?.length || 0;
 
   return (
     <div className={`section-card ${collapsed ? 'section-collapsed' : ''}`}>
@@ -37,8 +38,8 @@ function OptimizelySection({ data }) {
             <circle cx="10" cy="10" r="3" fill="#0037FF"/>
           </svg>
           Optimizely
-          <span className={`section-badge ${activeExperiments.length > 0 ? 'badge-success' : 'badge-warning'}`}>
-            {activeExperiments.length} Active
+          <span className="section-badge badge-success">
+            {experimentCount} Experiment{experimentCount !== 1 ? 's' : ''}
           </span>
           {isMyProject && (
             <span className="section-badge badge-info">My Project</span>
@@ -53,47 +54,50 @@ function OptimizelySection({ data }) {
         <div className="kv-table" style={{ marginBottom: '1rem' }}>
           <div className="kv-row">
             <span className="kv-key">Project ID</span>
-            <span className="kv-value">{data.projectId || 'Unknown'}</span>
+            <span className="kv-value">{projectId}</span>
           </div>
-          <div className="kv-row">
-            <span className="kv-key">Account ID</span>
-            <span className="kv-value">{data.accountId || 'Unknown'}</span>
-          </div>
-          <div className="kv-row">
-            <span className="kv-key">Revision</span>
-            <span className="kv-value">{data.revision || 'Unknown'}</span>
-          </div>
-          {data.visitor?.visitorId && (
+          {data.datafile?.accountId && (
             <div className="kv-row">
-              <span className="kv-key">Visitor ID</span>
-              <span className="kv-value" style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                {data.visitor.visitorId}
+              <span className="kv-key">Account ID</span>
+              <span className="kv-value">{data.datafile.accountId}</span>
+            </div>
+          )}
+          {data.datafile?.revision && (
+            <div className="kv-row">
+              <span className="kv-key">Revision</span>
+              <span className="kv-value">{data.datafile.revision}</span>
+            </div>
+          )}
+          {data.snippetUrls?.length > 0 && (
+            <div className="kv-row">
+              <span className="kv-key">Snippet</span>
+              <span className="kv-value" style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>
+                {data.snippetUrls[0]}
               </span>
             </div>
           )}
         </div>
 
         <h4 style={{ marginBottom: '0.75rem', fontSize: '0.9rem', color: '#374151' }}>
-          Experiments ({data.experiments?.length || 0})
+          Experiments ({experimentCount})
         </h4>
 
         {data.experiments?.length > 0 ? (
           <div className="data-grid">
-            {data.experiments.map((exp) => (
-              <div key={exp.id} className="data-item">
+            {data.experiments.map((exp, idx) => (
+              <div key={exp.id || idx} className="data-item">
                 <div className="data-item-header">
                   <div>
-                    <div className="data-item-title">{exp.name}</div>
+                    <div className="data-item-title">{exp.name || exp.key || `Experiment ${exp.id}`}</div>
                     <div className="data-item-id">ID: {exp.id}</div>
                   </div>
-                  <span className={`section-badge ${exp.isActive ? 'badge-success' : 'badge-neutral'}`}>
-                    {exp.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-
-                <div className="data-row">
-                  <span className="data-label">Status:</span>
-                  <span className="data-value">{exp.status}</span>
+                  {exp.type === 'feature_flag' ? (
+                    <span className="section-badge badge-info">Feature Flag</span>
+                  ) : (
+                    <span className={`section-badge ${exp.status === 'Running' || exp.status === 'running' ? 'badge-success' : 'badge-neutral'}`}>
+                      {exp.status || 'Unknown'}
+                    </span>
+                  )}
                 </div>
 
                 {exp.percentageIncluded != null && (
@@ -103,25 +107,16 @@ function OptimizelySection({ data }) {
                   </div>
                 )}
 
-                {exp.holdback > 0 && (
-                  <div className="data-row">
-                    <span className="data-label">Holdback:</span>
-                    <span className="data-value">{exp.holdback / 100}%</span>
-                  </div>
-                )}
-
                 {exp.variations?.length > 0 && (
                   <div className="variations-list">
                     <div style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-                      Variations:
+                      Variations ({exp.variations.length}):
                     </div>
-                    {exp.variations.map((v) => (
-                      <div key={v.id} className="variation-item">
-                        <div className={`variation-indicator ${v.isCurrent ? 'current' : ''}`}></div>
+                    {exp.variations.map((v, vidx) => (
+                      <div key={v.id || vidx} className="variation-item">
+                        <div className="variation-indicator"></div>
                         <span className="variation-name">
-                          {v.name}
-                          {v.isControl && <span style={{ color: '#6b7280' }}> (Control)</span>}
-                          {v.isCurrent && <span style={{ color: '#0037ff', fontWeight: 500 }}> - You</span>}
+                          {v.name || v.key || `Variation ${v.id}`}
                         </span>
                         {v.weight != null && (
                           <span className="variation-weight">{v.weight / 100}%</span>
@@ -131,29 +126,19 @@ function OptimizelySection({ data }) {
                   </div>
                 )}
 
-                {exp.audiences?.length > 0 && (
+                {exp.variables?.length > 0 && (
                   <div className="data-row" style={{ marginTop: '0.5rem' }}>
-                    <span className="data-label">Audiences:</span>
+                    <span className="data-label">Variables:</span>
                     <span className="data-value">
-                      {exp.audiences.map(id => {
-                        const aud = data.audiences?.find(a => a.id === id);
-                        return aud?.name || id;
-                      }).join(', ')}
+                      {exp.variables.map(v => v.key).join(', ')}
                     </span>
-                  </div>
-                )}
-
-                {exp.metrics?.length > 0 && (
-                  <div className="data-row">
-                    <span className="data-label">Metrics:</span>
-                    <span className="data-value">{exp.metrics.length} configured</span>
                   </div>
                 )}
               </div>
             ))}
           </div>
         ) : (
-          <p className="no-data">No experiments configured.</p>
+          <p className="no-data">No experiments found in datafile.</p>
         )}
 
         {data.audiences?.length > 0 && (
@@ -162,9 +147,12 @@ function OptimizelySection({ data }) {
               Audiences ({data.audiences.length})
             </h4>
             <div className="tag-list">
-              {data.audiences.map((aud) => (
-                <span key={aud.id} className="tag">{aud.name}</span>
+              {data.audiences.slice(0, 20).map((aud, idx) => (
+                <span key={aud.id || idx} className="tag">{aud.name || aud.id}</span>
               ))}
+              {data.audiences.length > 20 && (
+                <span className="tag">+{data.audiences.length - 20} more</span>
+              )}
             </div>
           </>
         )}
@@ -175,8 +163,8 @@ function OptimizelySection({ data }) {
               Pages ({data.pages.length})
             </h4>
             <div className="tag-list">
-              {data.pages.slice(0, 20).map((pg) => (
-                <span key={pg.id} className="tag">{pg.name}</span>
+              {data.pages.slice(0, 20).map((pg, idx) => (
+                <span key={pg.id || idx} className="tag">{pg.name || pg.apiName || pg.id}</span>
               ))}
               {data.pages.length > 20 && (
                 <span className="tag">+{data.pages.length - 20} more</span>
@@ -191,8 +179,8 @@ function OptimizelySection({ data }) {
               Events ({data.events.length})
             </h4>
             <div className="tag-list">
-              {data.events.slice(0, 20).map((evt) => (
-                <span key={evt.id} className="tag">{evt.name || evt.apiName}</span>
+              {data.events.slice(0, 20).map((evt, idx) => (
+                <span key={evt.id || idx} className="tag">{evt.name || evt.key || evt.apiName || evt.id}</span>
               ))}
               {data.events.length > 20 && (
                 <span className="tag">+{data.events.length - 20} more</span>

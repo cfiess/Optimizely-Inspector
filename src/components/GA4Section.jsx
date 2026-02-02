@@ -1,8 +1,7 @@
 import { useState } from 'react';
 
-function GA4Section({ data, networkRequests }) {
+function GA4Section({ data }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [showDataLayer, setShowDataLayer] = useState(false);
 
   if (!data || !data.detected) {
     return (
@@ -25,6 +24,8 @@ function GA4Section({ data, networkRequests }) {
     );
   }
 
+  const totalIds = (data.measurementIds?.length || 0) + (data.gtmContainers?.length || 0);
+
   return (
     <div className={`section-card ${collapsed ? 'section-collapsed' : ''}`}>
       <div className="section-header" onClick={() => setCollapsed(!collapsed)}>
@@ -35,7 +36,7 @@ function GA4Section({ data, networkRequests }) {
             <circle cx="10" cy="10" r="7" stroke="#F59E0B" strokeWidth="2"/>
           </svg>
           GA4 / GTM
-          <span className="section-badge badge-success">Detected</span>
+          <span className="section-badge badge-success">{totalIds} ID{totalIds !== 1 ? 's' : ''}</span>
         </div>
         <svg className="collapse-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
           <path d="M6 8L10 12L14 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
@@ -72,110 +73,6 @@ function GA4Section({ data, networkRequests }) {
                 </span>
               ))}
             </div>
-          </>
-        )}
-
-        {/* Network Requests */}
-        {networkRequests?.length > 0 && (
-          <>
-            <h4 style={{ marginBottom: '0.75rem', fontSize: '0.9rem', color: '#374151' }}>
-              GA Network Requests ({networkRequests.length})
-            </h4>
-            <div style={{
-              background: '#f9fafb',
-              borderRadius: '6px',
-              padding: '0.75rem',
-              marginBottom: '1rem',
-              maxHeight: '150px',
-              overflowY: 'auto'
-            }}>
-              {networkRequests.slice(0, 10).map((req, i) => (
-                <div key={i} style={{
-                  fontSize: '0.75rem',
-                  fontFamily: 'monospace',
-                  padding: '0.25rem 0',
-                  borderBottom: i < 9 ? '1px solid #e5e7eb' : 'none',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}>
-                  <span style={{ color: '#0037ff', marginRight: '0.5rem' }}>{req.method}</span>
-                  {new URL(req.url).hostname}
-                </div>
-              ))}
-              {networkRequests.length > 10 && (
-                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                  +{networkRequests.length - 10} more requests
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* DataLayer Contents */}
-        {data.dataLayerContents?.length > 0 && (
-          <>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '0.75rem'
-            }}>
-              <h4 style={{ fontSize: '0.9rem', color: '#374151' }}>
-                DataLayer Events ({data.dataLayerContents.length})
-              </h4>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowDataLayer(!showDataLayer);
-                }}
-                style={{
-                  background: 'none',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '4px',
-                  padding: '0.25rem 0.5rem',
-                  fontSize: '0.75rem',
-                  cursor: 'pointer',
-                  color: '#4b5563'
-                }}
-              >
-                {showDataLayer ? 'Hide' : 'Show'} Raw Data
-              </button>
-            </div>
-
-            {/* Event summaries */}
-            <div style={{ marginBottom: '1rem' }}>
-              {data.dataLayerContents.slice(0, 15).map((item, i) => (
-                <div key={i} className="datalayer-item">
-                  {item.event && (
-                    <div className="datalayer-event">
-                      {item.event}
-                    </div>
-                  )}
-                  {item['gtm.start'] && (
-                    <div style={{ color: '#6b7280' }}>GTM initialized</div>
-                  )}
-                  {!item.event && !item['gtm.start'] && (
-                    <div style={{ color: '#6b7280' }}>
-                      {Object.keys(item).slice(0, 3).join(', ')}
-                      {Object.keys(item).length > 3 && '...'}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {data.dataLayerContents.length > 15 && (
-                <p style={{ fontSize: '0.8rem', color: '#6b7280' }}>
-                  +{data.dataLayerContents.length - 15} more events
-                </p>
-              )}
-            </div>
-
-            {/* Raw JSON display */}
-            {showDataLayer && (
-              <div className="json-display">
-                {JSON.stringify(data.dataLayerContents, null, 2)}
-              </div>
-            )}
           </>
         )}
 

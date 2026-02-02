@@ -2,7 +2,6 @@ import { useState } from 'react';
 import OptimizelySection from './components/OptimizelySection';
 import ShopifySection from './components/ShopifySection';
 import GA4Section from './components/GA4Section';
-import ScreenshotSection from './components/ScreenshotSection';
 
 function App() {
   const [url, setUrl] = useState('');
@@ -54,7 +53,7 @@ function App() {
     <div className="app">
       <header className="header">
         <div className="header-content">
-          <span className="version">v1.4</span>
+          <span className="version">v2.0</span>
           <div className="logo">
             <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect width="32" height="32" rx="8" fill="#0037FF"/>
@@ -88,8 +87,8 @@ function App() {
           <div className="loading">
             <div className="spinner"></div>
             <p className="loading-text">
-              Loading page and extracting data...<br/>
-              <small>This may take up to 30 seconds</small>
+              Analyzing page...<br/>
+              <small>Fetching HTML and Optimizely datafile</small>
             </p>
           </div>
         )}
@@ -113,7 +112,7 @@ function App() {
                   </svg>
                   Optimizely
                 </h3>
-                <p>Active experiments, variants, audiences, and traffic allocation</p>
+                <p>Experiments, feature flags, audiences, pages, and events from datafile</p>
               </div>
               <div className="feature-card">
                 <h3>
@@ -123,7 +122,7 @@ function App() {
                   </svg>
                   Shopify
                 </h3>
-                <p>Cart state, products, customer info, and checkout data</p>
+                <p>Store detection, theme info, and page type</p>
               </div>
               <div className="feature-card">
                 <h3>
@@ -134,7 +133,7 @@ function App() {
                   </svg>
                   GA4
                 </h3>
-                <p>Measurement IDs, GTM containers, and dataLayer events</p>
+                <p>Measurement IDs and GTM container IDs</p>
               </div>
             </div>
           </div>
@@ -143,13 +142,20 @@ function App() {
         {!loading && results && (
           <div className="results-grid">
             <div className="results-header">
-              <h2>Results for {results.data.pageInfo.title || 'Inspected Page'}</h2>
+              <h2>{results.data.pageInfo?.title || 'Inspected Page'}</h2>
               <span className="results-meta">
+                <a href={results.data.pageInfo?.url} target="_blank" rel="noopener noreferrer" style={{ color: '#6b7280', marginRight: '1rem' }}>
+                  {results.data.pageInfo?.url}
+                </a>
                 {new Date(results.timestamp).toLocaleString()}
               </span>
             </div>
 
-            <ScreenshotSection screenshot={results.screenshot} url={results.data.pageInfo.url} />
+            {results.data.pageInfo?.description && (
+              <p style={{ color: '#6b7280', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                {results.data.pageInfo.description}
+              </p>
+            )}
 
             <div className="two-col">
               <div>
@@ -158,7 +164,7 @@ function App() {
               <div>
                 <ShopifySection data={results.data.shopify} />
                 <div style={{ marginTop: '1.5rem' }}>
-                  <GA4Section data={results.data.ga4} networkRequests={results.ga4NetworkRequests} />
+                  <GA4Section data={results.data.ga4} />
                 </div>
               </div>
             </div>

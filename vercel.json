@@ -5,8 +5,8 @@
   "installCommand": "npm install",
   "functions": {
     "api/inspect.js": {
-      "memory": 1024,
-      "maxDuration": 60
+      "memory": 256,
+      "maxDuration": 30
     }
   },
   "rewrites": [
