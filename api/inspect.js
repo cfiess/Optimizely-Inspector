@@ -1,4 +1,4 @@
-const chromium = require('@sparticuz/chromium');
+const chromium = require('chromium');
 const puppeteer = require('puppeteer-core');
 
 // Hardcoded Optimizely Project ID for filtering
@@ -38,22 +38,26 @@ module.exports = async (req, res) => {
   let browser = null;
 
   try {
-    // Get executable path
-    const executablePath = await chromium.executablePath();
-
     // Launch browser
     browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath,
-      headless: chromium.headless,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-extensions',
+      ],
+      executablePath: chromium.path,
+      headless: 'new',
     });
 
     const page = await browser.newPage();
 
     await page.setViewport({ width: 1280, height: 720 });
 
-    // Set user agent
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
