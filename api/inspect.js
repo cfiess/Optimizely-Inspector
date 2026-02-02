@@ -1,8 +1,11 @@
-const chromium = require('chromium');
+const chromium = require('@sparticuz/chromium-min');
 const puppeteer = require('puppeteer-core');
 
 // Hardcoded Optimizely Project ID for filtering
 const MY_OPTIMIZELY_PROJECT_ID = '30018331732';
+
+// Remote Chromium URL - downloaded at runtime to avoid 250MB bundle limit
+const CHROMIUM_URL = 'https://github.com/nicholasgriffintn/chromium-for-vercel/releases/download/v119.0.0/chromium-v119.0.0-pack.tar';
 
 module.exports = async (req, res) => {
   // Enable CORS
@@ -38,20 +41,15 @@ module.exports = async (req, res) => {
   let browser = null;
 
   try {
+    // Get executable path - downloads chromium at runtime
+    const executablePath = await chromium.executablePath(CHROMIUM_URL);
+
     // Launch browser
     browser = await puppeteer.launch({
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-extensions',
-      ],
-      executablePath: chromium.path,
-      headless: 'new',
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
@@ -59,7 +57,7 @@ module.exports = async (req, res) => {
     await page.setViewport({ width: 1280, height: 720 });
 
     await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
     );
 
     // Navigate to URL
