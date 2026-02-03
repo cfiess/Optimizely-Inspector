@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Icon Generator</title>
+</head>
+<body>
+  <h3>Right-click each canvas and "Save image as..."</h3>
+  <p>icon16.png:</p>
+  <canvas id="c16" width="16" height="16"></canvas>
+  <p>icon48.png:</p>
+  <canvas id="c48" width="48" height="48"></canvas>
+  <p>icon128.png:</p>
+  <canvas id="c128" width="128" height="128"></canvas>
+  <script>
+    function drawIcon(canvas) {
+      const ctx = canvas.getContext('2d');
+      const size = canvas.width;
+      const r = size * 0.1875; // border radius ratio
+
+      // Blue background with rounded corners
+      ctx.fillStyle = '#0037FF';
+      ctx.beginPath();
+      ctx.roundRect(0, 0, size, size, r);
+      ctx.fill();
+
+      // White circle outline
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = size * 0.05;
+      ctx.beginPath();
+      ctx.arc(size/2, size/2, size * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // White center dot
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.arc(size/2, size/2, size * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    drawIcon(document.getElementById('c16'));
+    drawIcon(document.getElementById('c48'));
+    drawIcon(document.getElementById('c128'));
+  </script>
+</body>
+</html>

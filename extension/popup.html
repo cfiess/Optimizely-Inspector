@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 400px;
+      max-height: 600px;
+      overflow-y: auto;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      color: #1f2937;
+      background: #f9fafb;
+    }
+
+    .header {
+      background: #0037ff;
+      color: white;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .header svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .header h1 {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .loading {
+      padding: 40px 20px;
+      text-align: center;
+      color: #6b7280;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #e5e7eb;
+      border-top-color: #0037ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .no-optimizely {
+      padding: 40px 20px;
+      text-align: center;
+      color: #6b7280;
+    }
+
+    .no-optimizely svg {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    .content {
+      padding: 12px;
+    }
+
+    .section {
+      background: white;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .section-header {
+      padding: 12px;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 600;
+      font-size: 12px;
+      color: #374151;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-weight: 500;
+    }
+
+    .badge-success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .badge-warning {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .badge-info {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .experiment {
+      padding: 12px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .experiment:last-child {
+      border-bottom: none;
+    }
+
+    .exp-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .exp-name {
+      font-weight: 600;
+      font-size: 13px;
+      word-break: break-word;
+    }
+
+    .exp-id {
+      font-size: 10px;
+      color: #9ca3af;
+      font-family: monospace;
+    }
+
+    .current-variation {
+      background: #dbeafe;
+      color: #1e40af;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+
+    .current-variation strong {
+      display: block;
+      font-size: 12px;
+    }
+
+    .variations-label {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 6px;
+    }
+
+    .variation-btn {
+      display: block;
+      width: 100%;
+      padding: 8px 12px;
+      margin-bottom: 4px;
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      text-align: left;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s;
+    }
+
+    .variation-btn:last-child {
+      margin-bottom: 0;
+    }
+
+    .variation-btn:hover {
+      background: #e5e7eb;
+      border-color: #d1d5db;
+    }
+
+    .variation-btn.active {
+      background: #0037ff;
+      color: white;
+      border-color: #0037ff;
+    }
+
+    .variation-btn .weight {
+      float: right;
+      color: #9ca3af;
+      font-size: 11px;
+    }
+
+    .variation-btn.active .weight {
+      color: rgba(255,255,255,0.7);
+    }
+
+    .metrics-section {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #f3f4f6;
+    }
+
+    .metrics-label {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 4px;
+    }
+
+    .metric-tag {
+      display: inline-block;
+      background: #fef3c7;
+      color: #92400e;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      margin-right: 4px;
+      margin-bottom: 4px;
+    }
+
+    .api-token-section {
+      padding: 12px;
+    }
+
+    .api-token-section label {
+      display: block;
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 4px;
+    }
+
+    .api-token-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .api-token-input {
+      flex: 1;
+      padding: 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .api-token-input:focus {
+      outline: none;
+      border-color: #0037ff;
+      box-shadow: 0 0 0 2px rgba(0, 55, 255, 0.1);
+    }
+
+    .save-btn {
+      padding: 8px 12px;
+      background: #10b981;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .save-btn:hover {
+      background: #059669;
+    }
+
+    .refresh-btn {
+      background: none;
+      border: none;
+      color: white;
+      cursor: pointer;
+      padding: 4px;
+      opacity: 0.8;
+    }
+
+    .refresh-btn:hover {
+      opacity: 1;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 11px;
+    }
+
+    .info-label {
+      color: #6b7280;
+    }
+
+    .info-value {
+      color: #1f2937;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <svg viewBox="0 0 32 32" fill="none">
+      <circle cx="16" cy="16" r="12" stroke="white" stroke-width="2"/>
+      <circle cx="16" cy="16" r="5" fill="white"/>
+    </svg>
+    <h1>Optimizely Inspector</h1>
+    <button class="refresh-btn" id="refreshBtn" title="Refresh">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z"/>
+      </svg>
+    </button>
+  </div>
+
+  <div id="content">
+    <div class="loading">
+      <div class="spinner"></div>
+      <p>Detecting Optimizely...</p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

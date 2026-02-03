@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import OptimizelySection from './components/OptimizelySection';
 import ShopifySection from './components/ShopifySection';
 import GA4Section from './components/GA4Section';
+
+const STORAGE_KEY = 'optimizely_inspector_api_token';
 
 function App() {
   const [url, setUrl] = useState('');
@@ -10,6 +12,29 @@ function App() {
   const [results, setResults] = useState(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [apiToken, setApiToken] = useState('');
+  const [tokenSaved, setTokenSaved] = useState(false);
+
+  // Load saved token on mount
+  useEffect(() => {
+    const savedToken = localStorage.getItem(STORAGE_KEY);
+    if (savedToken) {
+      setApiToken(savedToken);
+      setTokenSaved(true);
+    }
+  }, []);
+
+  const handleSaveToken = () => {
+    if (apiToken.trim()) {
+      localStorage.setItem(STORAGE_KEY, apiToken.trim());
+      setTokenSaved(true);
+    }
+  };
+
+  const handleClearToken = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    setApiToken('');
+    setTokenSaved(false);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -58,7 +83,7 @@ function App() {
     <div className="app">
       <header className="header">
         <div className="header-content">
-          <span className="version">v2.2</span>
+          <span className="version">v2.3</span>
           <div className="logo">
             <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect width="32" height="32" rx="8" fill="#0037FF"/>
@@ -96,17 +121,36 @@ function App() {
           {showAdvanced && (
             <div className="advanced-settings">
               <div className="api-token-field">
-                <label htmlFor="apiToken">Optimizely API Token (optional)</label>
-                <input
-                  type="password"
-                  id="apiToken"
-                  className="api-token-input"
-                  placeholder="Enter your Optimizely API token for full experiment data"
-                  value={apiToken}
-                  onChange={(e) => setApiToken(e.target.value)}
-                />
+                <label htmlFor="apiToken">
+                  Optimizely API Token (optional)
+                  {tokenSaved && <span className="token-saved-badge">Saved</span>}
+                </label>
+                <div className="api-token-row">
+                  <input
+                    type="password"
+                    id="apiToken"
+                    className="api-token-input"
+                    placeholder="Enter your Optimizely API token for full experiment data"
+                    value={apiToken}
+                    onChange={(e) => {
+                      setApiToken(e.target.value);
+                      setTokenSaved(false);
+                    }}
+                  />
+                  {apiToken && !tokenSaved && (
+                    <button type="button" className="token-btn save-btn" onClick={handleSaveToken}>
+                      Save
+                    </button>
+                  )}
+                  {tokenSaved && (
+                    <button type="button" className="token-btn clear-btn" onClick={handleClearToken}>
+                      Clear
+                    </button>
+                  )}
+                </div>
                 <small className="api-token-help">
                   Get your token from Optimizely → Settings → API Access. Required for projects with host restrictions.
+                  {tokenSaved && ' Token is saved in your browser.'}
                 </small>
               </div>
             </div>
@@ -191,7 +235,7 @@ function App() {
 
             <div className="two-col">
               <div>
-                <OptimizelySection data={results.data.optimizely} />
+                <OptimizelySection data={results.data.optimizely} pageUrl={results.data.pageInfo?.url} />
               </div>
               <div>
                 <ShopifySection data={results.data.shopify} />

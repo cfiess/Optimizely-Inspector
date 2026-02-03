@@ -2,8 +2,9 @@ import { useState } from 'react';
 
 const MY_PROJECT_ID = '30018331732';
 
-function OptimizelySection({ data }) {
+function OptimizelySection({ data, pageUrl }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [showAllExperiments, setShowAllExperiments] = useState(false);
 
   if (!data || !data.detected) {
     return (
@@ -27,7 +28,27 @@ function OptimizelySection({ data }) {
 
   const projectId = data.datafile?.projectId || data.projectIds?.[0] || 'Unknown';
   const isMyProject = data.isMyProject || data.projectIds?.includes(MY_PROJECT_ID);
-  const experimentCount = data.experiments?.length || 0;
+
+  // Filter to running experiments
+  const allExperiments = data.experiments || [];
+  const runningExperiments = allExperiments.filter(exp =>
+    exp.status?.toLowerCase() === 'running' || exp.status?.toLowerCase() === 'active'
+  );
+  const displayExperiments = showAllExperiments ? allExperiments : runningExperiments;
+  const experimentCount = runningExperiments.length;
+  const totalCount = allExperiments.length;
+
+  // Helper to build force variation URL
+  const buildForceUrl = (experimentId, variationId) => {
+    if (!pageUrl) return null;
+    try {
+      const url = new URL(pageUrl);
+      url.searchParams.set(`optimizely_x${experimentId}`, variationId);
+      return url.toString();
+    } catch {
+      return null;
+    }
+  };
 
   return (
     <div className={`section-card ${collapsed ? 'section-collapsed' : ''}`}>
@@ -116,13 +137,34 @@ function OptimizelySection({ data }) {
           )}
         </div>
 
-        <h4 style={{ marginBottom: '0.75rem', fontSize: '0.9rem', color: '#374151' }}>
-          Experiments ({experimentCount})
-        </h4>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <h4 style={{ fontSize: '0.9rem', color: '#374151', margin: 0 }}>
+            Running Experiments ({experimentCount})
+            {totalCount > experimentCount && (
+              <span style={{ color: '#9ca3af', fontWeight: 'normal' }}> / {totalCount} total</span>
+            )}
+          </h4>
+          {totalCount > experimentCount && (
+            <button
+              type="button"
+              onClick={() => setShowAllExperiments(!showAllExperiments)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#0037ff',
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              {showAllExperiments ? 'Show running only' : 'Show all'}
+            </button>
+          )}
+        </div>
 
-        {data.experiments?.length > 0 ? (
+        {displayExperiments.length > 0 ? (
           <div className="data-grid">
-            {data.experiments.map((exp, idx) => (
+            {displayExperiments.map((exp, idx) => (
               <div key={exp.id || idx} className="data-item">
                 <div className="data-item-header">
                   <div>
@@ -169,28 +211,63 @@ function OptimizelySection({ data }) {
                 )}
 
                 {exp.metrics?.length > 0 && (
-                  <div className="data-row">
-                    <span className="data-label">Metrics:</span>
-                    <span className="data-value">{exp.metrics.length} configured</span>
+                  <div className="metrics-section" style={{ marginTop: '0.75rem', padding: '0.75rem', background: '#f9fafb', borderRadius: '6px' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: '0.5rem', fontWeight: '500' }}>
+                      Metrics ({exp.metrics.length}):
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      {exp.metrics.map((m, midx) => (
+                        <span key={m.id || midx} style={{
+                          background: '#dbeafe',
+                          color: '#1e40af',
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                        }}>
+                          {m.aggregator || 'count'} {m.field ? `(${m.field})` : ''} {m.winning_direction === 'increasing' ? '↑' : m.winning_direction === 'decreasing' ? '↓' : ''}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
 
                 {exp.variations?.length > 0 && (
                   <div className="variations-list">
                     <div style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-                      Variations ({exp.variations.length}):
+                      Variations ({exp.variations.length}): <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>Click to force</span>
                     </div>
-                    {exp.variations.map((v, vidx) => (
-                      <div key={v.id || vidx} className="variation-item">
-                        <div className="variation-indicator"></div>
-                        <span className="variation-name">
-                          {v.name || v.key || `Variation ${v.id}`}
-                        </span>
-                        {v.weight != null && (
-                          <span className="variation-weight">{v.weight / 100}%</span>
-                        )}
-                      </div>
-                    ))}
+                    {exp.variations.map((v, vidx) => {
+                      const forceUrl = buildForceUrl(exp.id, v.id);
+                      return (
+                        <div key={v.id || vidx} className="variation-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <div className="variation-indicator"></div>
+                          {forceUrl ? (
+                            <a
+                              href={forceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="variation-link"
+                              style={{
+                                flex: 1,
+                                color: '#0037ff',
+                                textDecoration: 'none',
+                              }}
+                              title={`Open page with ${v.name || v.key} forced`}
+                            >
+                              {v.name || v.key || `Variation ${v.id}`}
+                              <span style={{ marginLeft: '0.25rem', fontSize: '0.7rem' }}>↗</span>
+                            </a>
+                          ) : (
+                            <span className="variation-name" style={{ flex: 1 }}>
+                              {v.name || v.key || `Variation ${v.id}`}
+                            </span>
+                          )}
+                          {v.weight != null && (
+                            <span className="variation-weight">{typeof v.weight === 'number' && v.weight > 100 ? v.weight / 100 : v.weight}%</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 

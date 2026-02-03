@@ -595,3 +595,51 @@ body {
   font-size: 0.75rem;
   color: var(--gray-500);
 }
+
+.api-token-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.api-token-row .api-token-input {
+  flex: 1;
+}
+
+.token-btn {
+  padding: 0.625rem 1rem;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.save-btn {
+  background: var(--success);
+  color: white;
+}
+
+.save-btn:hover {
+  background: #059669;
+}
+
+.clear-btn {
+  background: var(--gray-200);
+  color: var(--gray-700);
+}
+
+.clear-btn:hover {
+  background: var(--gray-300);
+}
+
+.token-saved-badge {
+  margin-left: 0.5rem;
+  padding: 0.125rem 0.5rem;
+  background: #d1fae5;
+  color: #065f46;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
