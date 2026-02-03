@@ -8,6 +8,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [results, setResults] = useState(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [apiToken, setApiToken] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -28,7 +30,10 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url: targetUrl }),
+        body: JSON.stringify({
+          url: targetUrl,
+          optimizelyApiToken: apiToken || undefined,
+        }),
       });
 
       const data = await response.json();
@@ -53,7 +58,7 @@ function App() {
     <div className="app">
       <header className="header">
         <div className="header-content">
-          <span className="version">v2.1</span>
+          <span className="version">v2.2</span>
           <div className="logo">
             <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect width="32" height="32" rx="8" fill="#0037FF"/>
@@ -79,6 +84,33 @@ function App() {
               {loading ? 'Inspecting...' : 'Inspect'}
             </button>
           </form>
+        </div>
+        <div className="advanced-toggle">
+          <button
+            type="button"
+            className="advanced-btn"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+          >
+            {showAdvanced ? '▼' : '▶'} API Settings
+          </button>
+          {showAdvanced && (
+            <div className="advanced-settings">
+              <div className="api-token-field">
+                <label htmlFor="apiToken">Optimizely API Token (optional)</label>
+                <input
+                  type="password"
+                  id="apiToken"
+                  className="api-token-input"
+                  placeholder="Enter your Optimizely API token for full experiment data"
+                  value={apiToken}
+                  onChange={(e) => setApiToken(e.target.value)}
+                />
+                <small className="api-token-help">
+                  Get your token from Optimizely → Settings → API Access. Required for projects with host restrictions.
+                </small>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 

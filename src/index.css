@@ -533,3 +533,65 @@ body {
 .section-collapsed .collapse-icon {
   transform: rotate(-90deg);
 }
+
+/* Advanced Settings */
+.advanced-toggle {
+  width: 100%;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--gray-100);
+  margin-top: 0.5rem;
+}
+
+.advanced-btn {
+  background: none;
+  border: none;
+  color: var(--gray-500);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.advanced-btn:hover {
+  color: var(--gray-700);
+}
+
+.advanced-settings {
+  padding: 1rem 0 0 0;
+}
+
+.api-token-field {
+  max-width: 600px;
+}
+
+.api-token-field label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--gray-700);
+  margin-bottom: 0.5rem;
+}
+
+.api-token-input {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.api-token-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(0, 55, 255, 0.1);
+}
+
+.api-token-help {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--gray-500);
+}

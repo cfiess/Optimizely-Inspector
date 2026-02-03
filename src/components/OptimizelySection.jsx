@@ -74,8 +74,28 @@ function OptimizelySection({ data }) {
               <span className="kv-value">
                 {data.loadedVia === 'direct' && 'Direct script tag'}
                 {data.loadedVia === 'gtm' && 'Google Tag Manager'}
+                {data.loadedVia === 'shopify_integration' && 'Shopify Integration'}
                 {data.loadedVia === 'known_project' && 'Known project ID'}
+                {data.loadedVia === 'rest_api' && 'REST API (token provided)'}
               </span>
+            </div>
+          )}
+          {data.datafile?.projectName && (
+            <div className="kv-row">
+              <span className="kv-key">Project Name</span>
+              <span className="kv-value">{data.datafile.projectName}</span>
+            </div>
+          )}
+          {data.datafile?.platform && (
+            <div className="kv-row">
+              <span className="kv-key">Platform</span>
+              <span className="kv-value">{data.datafile.platform}</span>
+            </div>
+          )}
+          {data.apiError && (
+            <div className="kv-row">
+              <span className="kv-key" style={{ color: '#ef4444' }}>API Error</span>
+              <span className="kv-value" style={{ color: '#ef4444' }}>{data.apiError}</span>
             </div>
           )}
           {data.snippetUrls?.length > 0 && (
@@ -118,10 +138,40 @@ function OptimizelySection({ data }) {
                   )}
                 </div>
 
+                {exp.description && (
+                  <div className="data-row">
+                    <span className="data-label">Description:</span>
+                    <span className="data-value">{exp.description}</span>
+                  </div>
+                )}
+
                 {exp.percentageIncluded != null && (
                   <div className="data-row">
                     <span className="data-label">Traffic:</span>
-                    <span className="data-value">{exp.percentageIncluded / 100}%</span>
+                    <span className="data-value">{typeof exp.percentageIncluded === 'number' && exp.percentageIncluded > 100 ? exp.percentageIncluded / 100 : exp.percentageIncluded}%</span>
+                  </div>
+                )}
+
+                {exp.holdback != null && exp.holdback > 0 && (
+                  <div className="data-row">
+                    <span className="data-label">Holdback:</span>
+                    <span className="data-value">{exp.holdback}%</span>
+                  </div>
+                )}
+
+                {exp.url_targeting && (
+                  <div className="data-row">
+                    <span className="data-label">URL Targeting:</span>
+                    <span className="data-value" style={{ fontSize: '0.75rem' }}>
+                      {exp.url_targeting.edit_url || JSON.stringify(exp.url_targeting.conditions)}
+                    </span>
+                  </div>
+                )}
+
+                {exp.metrics?.length > 0 && (
+                  <div className="data-row">
+                    <span className="data-label">Metrics:</span>
+                    <span className="data-value">{exp.metrics.length} configured</span>
                   </div>
                 )}
 

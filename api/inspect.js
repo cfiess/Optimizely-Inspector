@@ -4,6 +4,9 @@ const cheerio = require('cheerio');
 // Hardcoded Optimizely Project ID - always check this
 const MY_OPTIMIZELY_PROJECT_ID = '30018331732';
 
+// Optimizely REST API base URL
+const OPTIMIZELY_API_BASE = 'https://api.optimizely.com/v2';
+
 module.exports = async (req, res) => {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -18,7 +21,7 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { url } = req.body;
+  const { url, optimizelyApiToken } = req.body;
 
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
@@ -135,38 +138,50 @@ module.exports = async (req, res) => {
 
     // Helper function to fetch and parse Optimizely datafile
     async function fetchOptimizelyData(projectId) {
-      // Try the Web snippet JSON format first (more common for Web Experimentation)
-      const urls = [
-        `https://cdn.optimizely.com/json/${projectId}.json`,
+      // For Optimizely Web Experimentation, the data is in the JS snippet
+      const snippetUrl = `https://cdn.optimizely.com/js/${projectId}.js`;
+
+      try {
+        const response = await fetch(snippetUrl, {
+          timeout: 10000,
+          headers: {
+            'Accept': '*/*',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          }
+        });
+
+        if (response.ok) {
+          const jsContent = await response.text();
+
+          // The Optimizely Web snippet contains experiment data in various formats
+          // Look for the main data object
+          const parsedData = parseOptimizelySnippet(jsContent);
+
+          if (parsedData && (parsedData.experiments?.length > 0 || parsedData.campaigns?.length > 0)) {
+            return { data: parsedData, url: snippetUrl };
+          }
+        }
+      } catch (e) {
+        console.error(`Error fetching snippet for ${projectId}:`, e.message);
+      }
+
+      // Also try JSON endpoints as fallback (for Full Stack projects)
+      const jsonUrls = [
         `https://cdn.optimizely.com/datafiles/${projectId}.json`,
-        `https://cdn.optimizely.com/public/${projectId}/snippet.js`,
+        `https://cdn.optimizely.com/json/${projectId}.json`,
       ];
 
-      for (const dataUrl of urls) {
+      for (const dataUrl of jsonUrls) {
         try {
           const dataResponse = await fetch(dataUrl, {
             timeout: 5000,
             headers: {
-              'Accept': 'application/json, text/javascript, */*',
+              'Accept': 'application/json',
             }
           });
 
           if (dataResponse.ok) {
-            const contentType = dataResponse.headers.get('content-type') || '';
-            let data;
-
-            if (contentType.includes('javascript') || dataUrl.includes('snippet.js')) {
-              // Parse JavaScript snippet to extract data
-              const jsContent = await dataResponse.text();
-              // Look for JSON data in the snippet
-              const jsonMatch = jsContent.match(/var defined_cdn_json\s*=\s*(\{[\s\S]*?\});/);
-              if (jsonMatch) {
-                data = JSON.parse(jsonMatch[1]);
-              }
-            } else {
-              data = await dataResponse.json();
-            }
-
+            const data = await dataResponse.json();
             if (data) {
               return { data, url: dataUrl };
             }
@@ -178,19 +193,409 @@ module.exports = async (req, res) => {
       return null;
     }
 
-    // Fetch data for all project IDs
-    for (const projectId of optimizelyData.projectIds) {
-      const result = await fetchOptimizelyData(projectId);
+    // Parse Optimizely Web snippet to extract experiment data
+    function parseOptimizelySnippet(jsContent) {
+      const result = {
+        experiments: [],
+        campaigns: [],
+        audiences: [],
+        pages: [],
+        events: [],
+        dimensions: [],
+        projectId: null,
+        accountId: null,
+        revision: null,
+      };
 
-      if (result) {
-        const { data, url } = result;
+      try {
+        // Extract project ID
+        const projectIdMatch = jsContent.match(/projectId["']?\s*[=:]\s*["']?(\d+)/);
+        if (projectIdMatch) {
+          result.projectId = projectIdMatch[1];
+        }
+
+        // Extract account ID
+        const accountIdMatch = jsContent.match(/accountId["']?\s*[=:]\s*["']?(\d+)/);
+        if (accountIdMatch) {
+          result.accountId = accountIdMatch[1];
+        }
+
+        // Extract revision
+        const revisionMatch = jsContent.match(/revision["']?\s*[=:]\s*["']?(\d+)/);
+        if (revisionMatch) {
+          result.revision = revisionMatch[1];
+        }
+
+        // Method 1: Look for experiments array in modern format
+        // Pattern: "experiments":[{...},{...}]
+        const experimentsArrayMatch = jsContent.match(/"experiments"\s*:\s*\[([^\]]*(?:\[[^\]]*\][^\]]*)*)\]/);
+        if (experimentsArrayMatch) {
+          try {
+            const experimentsJson = `[${experimentsArrayMatch[1]}]`;
+            const experiments = JSON.parse(experimentsJson);
+            experiments.forEach(exp => {
+              result.experiments.push({
+                id: exp.id?.toString(),
+                name: exp.name || exp.key || `Experiment ${exp.id}`,
+                key: exp.key,
+                status: exp.status || 'active',
+                type: 'experiment',
+                percentageIncluded: exp.percentageIncluded || exp.trafficAllocation,
+                audienceIds: exp.audienceIds || [],
+                variations: (exp.variations || []).map(v => ({
+                  id: v.id?.toString(),
+                  name: v.name || v.key,
+                  weight: v.weight,
+                })),
+              });
+            });
+          } catch (e) {
+            // JSON parse failed, try regex extraction
+          }
+        }
+
+        // Method 2: Extract individual experiment objects using regex
+        // Pattern: {id:123,name:"...",status:"running",...}
+        const expRegex = /\{[^{}]*"?id"?\s*:\s*(\d+)[^{}]*"?name"?\s*:\s*"([^"]+)"[^{}]*"?status"?\s*:\s*"([^"]+)"[^{}]*\}/g;
+        let expMatch;
+        while ((expMatch = expRegex.exec(jsContent)) !== null) {
+          const expId = expMatch[1];
+          // Avoid duplicates
+          if (!result.experiments.find(e => e.id === expId)) {
+            result.experiments.push({
+              id: expId,
+              name: expMatch[2],
+              status: expMatch[3],
+              type: 'experiment',
+            });
+          }
+        }
+
+        // Method 3: Look for campaign data
+        const campaignRegex = /"?campaigns"?\s*:\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}/;
+        const campaignMatch = jsContent.match(campaignRegex);
+        if (campaignMatch) {
+          // Extract campaign IDs and names
+          const campIdRegex = /"?(\d{8,})"?\s*:\s*\{[^}]*"?name"?\s*:\s*"([^"]+)"/g;
+          let campMatch;
+          while ((campMatch = campIdRegex.exec(campaignMatch[1])) !== null) {
+            result.campaigns.push({
+              id: campMatch[1],
+              name: campMatch[2],
+              type: 'campaign',
+            });
+          }
+        }
+
+        // Method 4: Look for variations data to find experiments
+        const variationsRegex = /"?variations"?\s*:\s*\{[^}]*"?(\d+)"?\s*:\s*\{[^}]*"?name"?\s*:\s*"([^"]+)"/g;
+        let varMatch;
+        while ((varMatch = variationsRegex.exec(jsContent)) !== null) {
+          // Variations found indicate experiments exist
+        }
+
+        // Method 5: Look for audiences
+        const audienceRegex = /"?audiences"?\s*:\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}/;
+        const audienceMatch = jsContent.match(audienceRegex);
+        if (audienceMatch) {
+          const audIdRegex = /"?(\d+)"?\s*:\s*\{[^}]*"?name"?\s*:\s*"([^"]+)"/g;
+          let audMatch;
+          while ((audMatch = audIdRegex.exec(audienceMatch[1])) !== null) {
+            result.audiences.push({
+              id: audMatch[1],
+              name: audMatch[2],
+            });
+          }
+        }
+
+        // Method 6: Look for pages
+        const pagesRegex = /"?pages"?\s*:\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}/;
+        const pagesMatch = jsContent.match(pagesRegex);
+        if (pagesMatch) {
+          const pageIdRegex = /"?(\d+)"?\s*:\s*\{[^}]*"?name"?\s*:\s*"([^"]+)"/g;
+          let pageMatch;
+          while ((pageMatch = pageIdRegex.exec(pagesMatch[1])) !== null) {
+            result.pages.push({
+              id: pageMatch[1],
+              name: pageMatch[2],
+            });
+          }
+        }
+
+        // Method 7: Look for events/goals
+        const eventsRegex = /"?events"?\s*:\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}/;
+        const eventsMatch = jsContent.match(eventsRegex);
+        if (eventsMatch) {
+          const eventIdRegex = /"?(\d+)"?\s*:\s*\{[^}]*"?name"?\s*:\s*"([^"]+)"/g;
+          let eventMatch;
+          while ((eventMatch = eventIdRegex.exec(eventsMatch[1])) !== null) {
+            result.events.push({
+              id: eventMatch[1],
+              name: eventMatch[2],
+            });
+          }
+        }
+
+        // Method 8: More aggressive experiment extraction
+        // Look for any ID with associated name that looks like an experiment
+        const genericExpRegex = /["']?id["']?\s*:\s*["']?(\d{10,})["']?[,\s]*["']?name["']?\s*:\s*["']([^"']+)["']/g;
+        let genMatch;
+        while ((genMatch = genericExpRegex.exec(jsContent)) !== null) {
+          const expId = genMatch[1];
+          const expName = genMatch[2];
+          // Only add if it looks like an experiment name and not a duplicate
+          if (!result.experiments.find(e => e.id === expId) &&
+              !result.pages.find(p => p.id === expId) &&
+              !result.events.find(e => e.id === expId)) {
+            // Check if this ID appears in an experiment context
+            const contextCheck = jsContent.substring(Math.max(0, genMatch.index - 100), genMatch.index);
+            if (contextCheck.includes('experiment') || contextCheck.includes('variation') ||
+                contextCheck.includes('campaign') || contextCheck.includes('test')) {
+              result.experiments.push({
+                id: expId,
+                name: expName,
+                type: 'experiment',
+                status: 'active',
+              });
+            }
+          }
+        }
+
+      } catch (e) {
+        console.error('Error parsing Optimizely snippet:', e.message);
+      }
+
+      return result;
+    }
+
+    // Fetch experiments using Optimizely REST API (requires API token)
+    async function fetchExperimentsViaAPI(projectId, apiToken) {
+      if (!apiToken) return null;
+
+      try {
+        // Fetch experiments
+        const experimentsResponse = await fetch(
+          `${OPTIMIZELY_API_BASE}/experiments?project_id=${projectId}&per_page=100`,
+          {
+            headers: {
+              'Authorization': `Bearer ${apiToken}`,
+              'Accept': 'application/json',
+            },
+            timeout: 10000,
+          }
+        );
+
+        if (!experimentsResponse.ok) {
+          if (experimentsResponse.status === 401 || experimentsResponse.status === 403) {
+            throw new Error('Invalid or unauthorized API token');
+          }
+          return null;
+        }
+
+        const experiments = await experimentsResponse.json();
+
+        // Fetch audiences
+        let audiences = [];
+        try {
+          const audiencesResponse = await fetch(
+            `${OPTIMIZELY_API_BASE}/audiences?project_id=${projectId}&per_page=100`,
+            {
+              headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Accept': 'application/json',
+              },
+              timeout: 10000,
+            }
+          );
+          if (audiencesResponse.ok) {
+            audiences = await audiencesResponse.json();
+          }
+        } catch (e) {
+          // Audiences fetch failed, continue without them
+        }
+
+        // Fetch pages
+        let pages = [];
+        try {
+          const pagesResponse = await fetch(
+            `${OPTIMIZELY_API_BASE}/pages?project_id=${projectId}&per_page=100`,
+            {
+              headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Accept': 'application/json',
+              },
+              timeout: 10000,
+            }
+          );
+          if (pagesResponse.ok) {
+            pages = await pagesResponse.json();
+          }
+        } catch (e) {
+          // Pages fetch failed, continue without them
+        }
+
+        // Fetch events
+        let events = [];
+        try {
+          const eventsResponse = await fetch(
+            `${OPTIMIZELY_API_BASE}/events?project_id=${projectId}&per_page=100`,
+            {
+              headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Accept': 'application/json',
+              },
+              timeout: 10000,
+            }
+          );
+          if (eventsResponse.ok) {
+            events = await eventsResponse.json();
+          }
+        } catch (e) {
+          // Events fetch failed, continue without them
+        }
+
+        // Fetch project info
+        let projectInfo = null;
+        try {
+          const projectResponse = await fetch(
+            `${OPTIMIZELY_API_BASE}/projects/${projectId}`,
+            {
+              headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Accept': 'application/json',
+              },
+              timeout: 10000,
+            }
+          );
+          if (projectResponse.ok) {
+            projectInfo = await projectResponse.json();
+          }
+        } catch (e) {
+          // Project fetch failed, continue without it
+        }
+
+        return {
+          experiments: experiments.map(exp => ({
+            id: exp.id?.toString(),
+            name: exp.name,
+            key: exp.key,
+            description: exp.description,
+            status: exp.status,
+            type: exp.type || 'experiment',
+            created: exp.created,
+            last_modified: exp.last_modified,
+            percentageIncluded: exp.traffic_allocation,
+            holdback: exp.holdback,
+            audienceIds: exp.audience_conditions?.audiences?.map(a => a.audience_id) || [],
+            variations: (exp.variations || []).map(v => ({
+              id: v.variation_id?.toString(),
+              name: v.name,
+              key: v.key,
+              description: v.description,
+              weight: v.weight,
+            })),
+            metrics: (exp.metrics || []).map(m => ({
+              id: m.event_id?.toString(),
+              aggregator: m.aggregator,
+              field: m.field,
+              scope: m.scope,
+              winning_direction: m.winning_direction,
+            })),
+            url_targeting: exp.url_targeting,
+          })),
+          audiences: audiences.map(aud => ({
+            id: aud.id?.toString(),
+            name: aud.name,
+            description: aud.description,
+            conditions: aud.conditions,
+            created: aud.created,
+            last_modified: aud.last_modified,
+          })),
+          pages: pages.map(page => ({
+            id: page.id?.toString(),
+            name: page.name,
+            key: page.key,
+            edit_url: page.edit_url,
+            created: page.created,
+            last_modified: page.last_modified,
+          })),
+          events: events.map(evt => ({
+            id: evt.id?.toString(),
+            name: evt.name,
+            key: evt.key,
+            event_type: evt.event_type,
+            created: evt.created,
+          })),
+          project: projectInfo ? {
+            id: projectInfo.id?.toString(),
+            name: projectInfo.name,
+            account_id: projectInfo.account_id?.toString(),
+            platform: projectInfo.platform,
+            status: projectInfo.status,
+            created: projectInfo.created,
+          } : null,
+          fetchedVia: 'rest_api',
+        };
+      } catch (e) {
+        console.error('Error fetching via Optimizely API:', e.message);
+        return { error: e.message };
+      }
+    }
+
+    // Try REST API first if token is provided
+    if (optimizelyApiToken) {
+      for (const projectId of optimizelyData.projectIds) {
+        const apiResult = await fetchExperimentsViaAPI(projectId, optimizelyApiToken);
+
+        if (apiResult && !apiResult.error) {
+          optimizelyData.detected = true;
+          optimizelyData.loadedVia = 'rest_api';
+
+          if (projectId === MY_OPTIMIZELY_PROJECT_ID) {
+            optimizelyData.isMyProject = true;
+          }
+
+          // Store project info
+          if (apiResult.project) {
+            optimizelyData.datafile = {
+              projectId: apiResult.project.id,
+              accountId: apiResult.project.account_id,
+              projectName: apiResult.project.name,
+              platform: apiResult.project.platform,
+              status: apiResult.project.status,
+            };
+          }
+
+          // Add experiments
+          optimizelyData.experiments = apiResult.experiments || [];
+          optimizelyData.audiences = apiResult.audiences || [];
+          optimizelyData.pages = apiResult.pages || [];
+          optimizelyData.events = apiResult.events || [];
+
+          // Successfully fetched via API, break the loop
+          break;
+        } else if (apiResult && apiResult.error) {
+          // Store the error but continue trying other methods
+          optimizelyData.apiError = apiResult.error;
+        }
+      }
+    }
+
+    // If API didn't work or no token, try CDN datafile
+    if (optimizelyData.experiments.length === 0) {
+      // Fetch data for all project IDs
+      for (const projectId of optimizelyData.projectIds) {
+      const fetchResult = await fetchOptimizelyData(projectId);
+
+      if (fetchResult) {
+        const { data, url } = fetchResult;
 
         // Mark as detected
         optimizelyData.detected = true;
 
-        // If this is the known project and wasn't found in HTML, it's loaded via GTM
+        // If this is the known project and wasn't found in HTML, it's loaded via GTM/Shopify
         if (projectId === MY_OPTIMIZELY_PROJECT_ID && !optimizelyData.snippetUrls.length) {
-          optimizelyData.loadedVia = hasGTM ? 'gtm' : 'known_project';
+          optimizelyData.loadedVia = hasGTM ? 'gtm' : 'shopify_integration';
           optimizelyData.isMyProject = true;
         }
 
@@ -203,122 +608,90 @@ module.exports = async (req, res) => {
           datafileUrl: url,
         };
 
-        // Extract experiments (Web Experimentation format)
-        if (data.experiments && typeof data.experiments === 'object') {
-          if (Array.isArray(data.experiments)) {
-            // Full Stack format
-            data.experiments.forEach(exp => {
+        // Add snippet URL if we got it from the JS endpoint
+        if (url.includes('/js/') && !optimizelyData.snippetUrls.includes(url)) {
+          optimizelyData.snippetUrls.push(url);
+        }
+
+        // Merge experiments from parsed data
+        if (data.experiments && Array.isArray(data.experiments)) {
+          data.experiments.forEach(exp => {
+            // Avoid duplicates
+            if (!optimizelyData.experiments.find(e => e.id === exp.id)) {
               optimizelyData.experiments.push({
                 id: exp.id,
+                name: exp.name || exp.key || `Experiment ${exp.id}`,
                 key: exp.key,
-                name: exp.key,
-                status: exp.status,
-                variations: exp.variations?.map(v => ({
-                  id: v.id,
-                  key: v.key,
-                  name: v.key,
-                })) || [],
-              });
-            });
-          } else {
-            // Web format (object with experiment IDs as keys)
-            Object.entries(data.experiments).forEach(([id, exp]) => {
-              optimizelyData.experiments.push({
-                id,
-                name: exp.name,
-                status: exp.status || 'unknown',
+                status: exp.status || 'active',
+                type: exp.type || 'experiment',
                 percentageIncluded: exp.percentageIncluded,
                 audienceIds: exp.audienceIds,
-                variations: exp.variations ? Object.entries(exp.variations).map(([vid, v]) => ({
-                  id: vid,
-                  name: v.name,
-                  weight: v.weight,
-                })) : [],
+                variations: exp.variations || [],
               });
-            });
-          }
-        }
-
-        // Extract campaigns (Web Experimentation)
-        if (data.campaigns && typeof data.campaigns === 'object') {
-          Object.entries(data.campaigns).forEach(([id, campaign]) => {
-            optimizelyData.experiments.push({
-              id,
-              name: campaign.name,
-              type: 'campaign',
-              status: campaign.status || 'unknown',
-              percentageIncluded: campaign.percentageIncluded,
-            });
+            }
           });
         }
 
-        // Extract feature flags
-        if (data.featureFlags && Array.isArray(data.featureFlags)) {
-          data.featureFlags.forEach(ff => {
-            optimizelyData.experiments.push({
-              id: ff.id,
-              key: ff.key,
-              name: ff.key,
-              type: 'feature_flag',
-              variables: ff.variables?.map(v => ({ key: v.key, type: v.type })) || [],
-            });
+        // Merge campaigns
+        if (data.campaigns && Array.isArray(data.campaigns)) {
+          data.campaigns.forEach(camp => {
+            if (!optimizelyData.experiments.find(e => e.id === camp.id)) {
+              optimizelyData.experiments.push({
+                id: camp.id,
+                name: camp.name,
+                type: 'campaign',
+                status: camp.status || 'active',
+              });
+            }
           });
         }
 
-        // Extract audiences
-        if (data.audiences) {
-          if (Array.isArray(data.audiences)) {
-            data.audiences.forEach(aud => {
-              optimizelyData.audiences.push({ id: aud.id, name: aud.name });
-            });
-          } else {
-            Object.entries(data.audiences).forEach(([id, aud]) => {
-              optimizelyData.audiences.push({ id, name: aud.name });
-            });
-          }
-        }
-
-        // Extract pages
-        if (data.pages) {
-          Object.entries(data.pages).forEach(([id, page]) => {
-            optimizelyData.pages.push({
-              id,
-              name: page.name,
-              apiName: page.apiName,
-              category: page.category,
-            });
+        // Merge audiences
+        if (data.audiences && Array.isArray(data.audiences)) {
+          data.audiences.forEach(aud => {
+            if (!optimizelyData.audiences.find(a => a.id === aud.id)) {
+              optimizelyData.audiences.push({
+                id: aud.id,
+                name: aud.name,
+              });
+            }
           });
         }
 
-        // Extract events
-        if (data.events) {
-          if (Array.isArray(data.events)) {
-            data.events.forEach(evt => {
-              optimizelyData.events.push({ id: evt.id, key: evt.key, name: evt.key });
-            });
-          } else {
-            Object.entries(data.events).forEach(([id, evt]) => {
+        // Merge pages
+        if (data.pages && Array.isArray(data.pages)) {
+          data.pages.forEach(page => {
+            if (!optimizelyData.pages.find(p => p.id === page.id)) {
+              optimizelyData.pages.push({
+                id: page.id,
+                name: page.name,
+              });
+            }
+          });
+        }
+
+        // Merge events
+        if (data.events && Array.isArray(data.events)) {
+          data.events.forEach(evt => {
+            if (!optimizelyData.events.find(e => e.id === evt.id)) {
               optimizelyData.events.push({
-                id,
+                id: evt.id,
                 name: evt.name,
-                apiName: evt.apiName,
-                category: evt.category,
               });
-            });
-          }
+            }
+          });
         }
 
-        // Extract dimensions
-        if (data.dimensions) {
-          optimizelyData.dimensions = Object.entries(data.dimensions).map(([id, dim]) => ({
-            id,
-            name: dim.name,
-            apiName: dim.apiName,
-          }));
+        // Merge dimensions
+        if (data.dimensions && Array.isArray(data.dimensions)) {
+          optimizelyData.dimensions = data.dimensions;
         }
 
-        // We found data, no need to check other project IDs
-        break;
+        // If we found experiments, we're done
+        if (optimizelyData.experiments.length > 0) {
+          break;
+        }
+      }
       }
     }
 
